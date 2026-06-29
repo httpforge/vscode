@@ -1,0 +1,268 @@
+{
+  "name": "httpforge",
+  "displayName": "HttpForge",
+  "description": "Privacy First — Forge Your API Requests. Lightweight Postman/Insomnia/Bruno alternative inside VS Code",
+  "version": "0.1.1",
+  "publisher": "httpforge",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/httpforge/httpforge.git"
+  },
+  "bugs": {
+    "url": "https://github.com/httpforge/httpforge/issues"
+  },
+  "homepage": "https://httpforge.com",
+  "author": {
+    "name": "HttpForge",
+    "email": "httpforge@outlook.com",
+    "url": "https://github.com/httpforge/httpforge"
+  },
+  "qna": "https://github.com/httpforge/httpforge/issues",
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "Testing",
+    "Other",
+    "SCM Providers",
+    "Visualization"
+  ],
+  "keywords": [
+    "api",
+    "rest",
+    "http",
+    "graphql",
+    "websocket",
+    "soap",
+    "postman",
+    "insomnia",
+    "bruno",
+    "openapi",
+    "swagger",
+    "api client",
+    "api testing",
+    "collections",
+    "environment variables",
+    "git sync",
+    "api documentation",
+    "request builder",
+    "curl",
+    "webhook",
+    "privacy first",
+    "local-first",
+    "no telemetry"
+  ],
+  "galleryBanner": {
+    "color": "#1e3a5f",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onStartupFinished",
+    "onView:httpforge.launcher",
+    "onCommand:httpforge.showSidebar",
+    "onCommand:httpforge.open",
+    "onCommand:httpforge.sendRequest"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "httpforge-api",
+          "title": "HttpForge",
+          "icon": "media/activitybar.svg"
+        }
+      ]
+    },
+    "views": {
+      "httpforge-api": [
+        {
+          "type": "webview",
+          "id": "httpforge.launcher",
+          "name": "HttpForge",
+          "visibility": "visible"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "httpforge.showSidebar",
+        "title": "Show HttpForge Sidebar",
+        "category": "HttpForge",
+        "icon": {
+          "light": "media/activitybar.svg",
+          "dark": "media/activitybar-dark.svg"
+        }
+      },
+      {
+        "command": "httpforge.open",
+        "title": "Open API Client",
+        "category": "HttpForge",
+        "icon": {
+          "light": "media/activitybar.svg",
+          "dark": "media/activitybar-dark.svg"
+        }
+      },
+      {
+        "command": "httpforge.sendRequest",
+        "title": "Send Request",
+        "category": "HttpForge",
+        "icon": "$(play)"
+      },
+      {
+        "command": "httpforge.importCollection",
+        "title": "Import Collection",
+        "category": "HttpForge",
+        "icon": "$(cloud-download)"
+      },
+      {
+        "command": "httpforge.exportCollection",
+        "title": "Export Collection",
+        "category": "HttpForge",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "httpforge.newRequest",
+        "title": "New Request",
+        "category": "HttpForge",
+        "icon": "$(add)"
+      },
+      {
+        "command": "httpforge.newCollection",
+        "title": "New Collection",
+        "category": "HttpForge",
+        "icon": "$(new-folder)"
+      },
+      {
+        "command": "httpforge.gitSync",
+        "title": "Sync to Git Repository",
+        "category": "HttpForge",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "httpforge.publishDocs",
+        "title": "Publish API Documentation",
+        "category": "HttpForge",
+        "icon": "$(book)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "httpforge.open",
+          "when": "view == httpforge.launcher",
+          "group": "navigation@1"
+        },
+        {
+          "command": "httpforge.sendRequest",
+          "when": "view == httpforge.launcher",
+          "group": "navigation@2"
+        },
+        {
+          "command": "httpforge.importCollection",
+          "when": "view == httpforge.launcher",
+          "group": "navigation@3"
+        },
+        {
+          "command": "httpforge.exportCollection",
+          "when": "view == httpforge.launcher",
+          "group": "navigation@4"
+        },
+        {
+          "command": "httpforge.gitSync",
+          "when": "view == httpforge.launcher",
+          "group": "navigation@5"
+        },
+        {
+          "command": "httpforge.publishDocs",
+          "when": "view == httpforge.launcher",
+          "group": "navigation@6"
+        }
+      ],
+      "commandPalette": [
+        {
+          "command": "httpforge.showSidebar"
+        },
+        {
+          "command": "httpforge.open"
+        },
+        {
+          "command": "httpforge.sendRequest",
+          "when": "httpforge.panelFocused"
+        },
+        {
+          "command": "httpforge.importCollection"
+        },
+        {
+          "command": "httpforge.exportCollection"
+        },
+        {
+          "command": "httpforge.newRequest"
+        },
+        {
+          "command": "httpforge.newCollection"
+        },
+        {
+          "command": "httpforge.gitSync"
+        },
+        {
+          "command": "httpforge.publishDocs"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "httpforge.open",
+          "group": "navigation@99",
+          "when": "editorLangId != httpforge"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "httpforge.open",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "httpforge.sendRequest",
+        "key": "ctrl+enter",
+        "mac": "cmd+enter",
+        "when": "httpforge.panelFocused"
+      },
+      {
+        "command": "httpforge.importCollection",
+        "key": "ctrl+shift+i",
+        "mac": "cmd+shift+i"
+      },
+      {
+        "command": "httpforge.exportCollection",
+        "key": "ctrl+shift+e",
+        "mac": "cmd+shift+e",
+        "when": "httpforge.panelFocused"
+      }
+    ]
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "build": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "tsc --noEmit",
+    "test": "tsx --test src/test/**/*.test.ts",
+    "bump-version": "node scripts/bump-version.js",
+    "package": "npm run bump-version && npx @vscode/vsce package"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.8.1",
+    "yaml": "^2.9.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.96.0",
+    "tsx": "^4.20.3",
+    "typescript": "^5.3.3"
+  }
+}
