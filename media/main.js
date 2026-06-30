@@ -18,15 +18,15 @@
     copyright: 'Copyright (c) 2026 HttpForge',
     website: 'https://httpforge.com',
     email: 'httpforge@outlook.com',
-    docs: 'https://github.com/httpforge/httpforge/blob/main/README.md',
-    github: 'https://github.com/httpforge/httpforge',
+    docs: 'https://github.com/httpforge/vscode/blob/main/README.md',
+    github: 'https://github.com/httpforge/vscode',
     docLinks: {
-      releaseNotes: 'https://github.com/httpforge/httpforge/blob/main/CHANGELOG.md',
-      learningCenter: 'https://github.com/httpforge/httpforge/blob/main/README.md',
-      support: 'https://github.com/httpforge/httpforge/issues',
-      security: 'https://github.com/httpforge/httpforge/blob/main/SECURITY.md',
-      privacy: 'https://github.com/httpforge/httpforge/blob/main/PRIVACY.md',
-      terms: 'https://github.com/httpforge/httpforge/blob/main/TERMS.md',
+      releaseNotes: 'https://github.com/httpforge/vscode/blob/main/CHANGELOG.md',
+      learningCenter: 'https://github.com/httpforge/vscode/blob/main/README.md',
+      support: 'https://github.com/httpforge/vscode/issues',
+      security: 'https://github.com/httpforge/vscode/blob/main/SECURITY.md',
+      privacy: 'https://github.com/httpforge/vscode/blob/main/PRIVACY.md',
+      terms: 'https://github.com/httpforge/vscode/blob/main/TERMS.md',
     },
     features: [],
   };
@@ -254,7 +254,7 @@
 
   function renderGearMenu() {
     const version = appInfo.version ?? '0.0.0';
-    const github = appInfo.github || 'https://github.com/httpforge/httpforge';
+    const github = appInfo.github || 'https://github.com/httpforge/vscode';
     const blob = (path) => `${github.replace(/\/$/, '')}/blob/main/${path}`;
     const links = appInfo.docLinks ?? {};
     const items = [

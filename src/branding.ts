@@ -69,7 +69,7 @@ export interface AppInfo {
   features: string[]
 }
 
-const GITHUB_REPO = 'https://github.com/httpforge/httpforge'
+const GITHUB_REPO = 'https://github.com/httpforge/vscode'
 
 export const APP_INFO: AppInfo = {
   name: APP_NAME,

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="./media/logo.png" alt="HttpForge Logo" width="220"/>
+<img src="https://github.com/httpforge/vscode/raw/main/media/logo.png" alt="HttpForge Logo" width="220"/>
 
 
 
@@ -10,7 +10,7 @@
 
 An open-source alternative to Postman, Insomnia, Bruno, Thunder Client, and Hoppscotch designed for modern developers who need a fast, native, and extensible API workspace.
 
-[Website](https://httpforge.com) • [Documentation](https://httpforge.org/docs) • [Issues](https://github.com/httpforge/httpforge/issues) • [Discussions](https://github.com/httpforge/httpforge/discussions)
+[Website](https://httpforge.com) • [Documentation](https://httpforge.org/docs) • [Issues](https://github.com/httpforge/vscode/issues) • [Discussions](https://github.com/httpforge/vscode/discussions)
 
 ![License](https://img.shields.io/badge/license-MIT-green.svg)
 ![VS Code](https://img.shields.io/badge/VS%20Code-Extension-blue.svg)
@@ -257,7 +257,7 @@ More languages are continuously being added by the community.
 
 ### Workspace
 
-![Workspace](./media/screenshots/workspace.png)
+<img src="https://github.com/httpforge/vscode/raw/main/media/screenshots/workspace.png" alt="Workspace" width="800"/>
 
 
 ---

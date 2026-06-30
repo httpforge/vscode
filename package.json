@@ -8,18 +8,18 @@
   "icon": "media/icon.png",
   "repository": {
     "type": "git",
-    "url": "https://github.com/httpforge/httpforge.git"
+    "url": "https://github.com/httpforge/vscode.git"
   },
   "bugs": {
-    "url": "https://github.com/httpforge/httpforge/issues"
+    "url": "https://github.com/httpforge/vscode/issues"
   },
   "homepage": "https://httpforge.com",
   "author": {
     "name": "HttpForge",
     "email": "httpforge@outlook.com",
-    "url": "https://github.com/httpforge/httpforge"
+    "url": "https://github.com/httpforge/vscode"
   },
-  "qna": "https://github.com/httpforge/httpforge/issues",
+  "qna": "https://github.com/httpforge/vscode/issues",
   "engines": {
     "vscode": "^1.96.0"
   },
@@ -252,7 +252,8 @@
     "lint": "tsc --noEmit",
     "test": "tsx --test src/test/**/*.test.ts",
     "bump-version": "node scripts/bump-version.js",
-    "package": "npm run bump-version && npx @vscode/vsce package"
+    "package": "npm run bump-version && npx @vscode/vsce package",
+    "publish": "npm run compile && npx @vscode/vsce publish"
   },
   "dependencies": {
     "better-sqlite3": "^11.8.1",
