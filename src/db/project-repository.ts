@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { getDatabase, getDbPath, seedDefaultEnvVars } from './database'
+import { getDatabase, getDbPath } from './database'
 import { listEnvironments } from './environment-repository'
 import { assertCanCreateProject } from '../plan-limits'
 
@@ -113,7 +113,6 @@ export function getProjectById(id: string): ProjectFull | null {
 
 export function createProject(name: string, description = ''): ProjectFull {
   assertCanCreateProject()
-
   const db = getDatabase()
   const id = randomUUID()
   const now = Date.now()
@@ -121,8 +120,6 @@ export function createProject(name: string, description = ''): ProjectFull {
   db.prepare(
     'INSERT INTO projects (id, name, description, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
   ).run(id, name.trim(), description.trim(), now, now)
-
-  seedDefaultEnvVars(id)
 
   return getProjectById(id)!
 }
@@ -145,8 +142,12 @@ export function updateProject(id: string, data: { name?: string; description?: s
 
 export function deleteProject(id: string): boolean {
   const db = getDatabase()
-  const result = db.prepare('DELETE FROM projects WHERE id = ?').run(id)
-  return result.changes > 0
+  const deleteTx = db.transaction((projectId: string) => {
+    db.prepare('DELETE FROM app_settings WHERE key = ?').run(`gitRepoPath:${projectId}`)
+    const result = db.prepare('DELETE FROM projects WHERE id = ?').run(projectId)
+    return result.changes > 0
+  })
+  return deleteTx(id)
 }
 
 export function getEnvVariables(projectId: string, environment: string): EnvVariableDto[] {
@@ -216,6 +217,11 @@ export function getSetting(key: string): string | null {
 export function setSetting(key: string, value: string): void {
   const db = getDatabase()
   db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, value)
+}
+
+export function deleteSetting(key: string): void {
+  const db = getDatabase()
+  db.prepare('DELETE FROM app_settings WHERE key = ?').run(key)
 }
 
 export function getDbInfo(): { path: string; projectCount: number } {

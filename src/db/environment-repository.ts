@@ -34,6 +34,8 @@ export function createEnvironment(projectId: string, name: string, color: string
     'INSERT INTO project_environments (id, project_id, name, color, sort_order) VALUES (?, ?, ?, ?, ?)'
   ).run(id, projectId, name.trim(), color, maxOrder.m + 1)
 
+  seedEnvironmentVars(projectId, id)
+
   return { id, name: name.trim(), color, sortOrder: maxOrder.m + 1 }
 }
 
@@ -99,9 +101,6 @@ export function duplicateEnvironment(
 export function deleteEnvironment(projectId: string, environmentId: string): { success: boolean; fallbackEnvironmentId?: string } {
   const db = getDatabase()
   const envs = listEnvironments(projectId)
-  if (envs.length <= 1) {
-    throw new Error('Cannot delete the last environment')
-  }
 
   const exists = envs.some((e) => e.id === environmentId)
   if (!exists) throw new Error('Environment not found')
@@ -124,7 +123,8 @@ function seedEnvironmentVars(projectId: string, environmentId: string): void {
     'INSERT OR IGNORE INTO env_variables (id, project_id, environment, key, value, is_secret) VALUES (?, ?, ?, ?, ?, ?)'
   )
   for (const v of DEFAULT_ENV_VARS) {
-    insert.run(randomUUID(), projectId, environmentId, v.key, v.value, v.secret ? 1 : 0)
+    const value = v.key === 'BASE_URL' ? 'http://localhost' : v.value
+    insert.run(randomUUID(), projectId, environmentId, v.key, value, v.secret ? 1 : 0)
   }
 }
 

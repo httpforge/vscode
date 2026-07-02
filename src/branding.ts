@@ -75,7 +75,7 @@ export const APP_INFO: AppInfo = {
   name: APP_NAME,
   version: '0.1.17',
   tagline: 'Forge Your API Requests',
-  openSourceTagline: 'Privacy First · Lightweight alternative to Postman, Insomnia & Bruno',
+  openSourceTagline: 'Privacy-First API Development and Testing Platform',
   description:
     'HttpForge is an open-source VS Code extension for API development and testing. Explore and send HTTP, GraphQL, and WebSocket requests, manage collections and environments, sync with Git, publish API documentation, and import or export Postman and OpenAPI formats — without leaving your editor.',
   platform: 'VS Code Extension · Open Source',

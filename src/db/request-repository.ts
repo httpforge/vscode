@@ -11,7 +11,7 @@ export interface RequestDto {
 }
 
 const VALID_METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'])
-const VALID_PROTOCOLS = new Set(['http', 'graphql', 'soap', 'websocket', 'grpc', 'socketio', 'mqtt', 'ai', 'mcp'])
+const VALID_PROTOCOLS = new Set(['http', 'graphql', 'soap', 'websocket', 'grpc', 'socketio', 'ai', 'mcp'])
 
 function touchProject(projectId: string): void {
   getDatabase().prepare('UPDATE projects SET updated_at = ? WHERE id = ?').run(Date.now(), projectId)

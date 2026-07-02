@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { APP_NAME } from './branding';
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, rmSync } from 'fs';
 import { join } from 'path';
 import { initDatabase, closeDatabase, isDatabaseReady } from './db/database';
 import {
@@ -15,6 +15,7 @@ import {
   deleteEnvVariable,
   getSetting,
   setSetting,
+  deleteSetting,
   getDbInfo,
 } from './db/project-repository';
 import {
@@ -31,10 +32,10 @@ import {
   duplicateEnvironment,
   deleteEnvironment,
 } from './db/environment-repository';
-import { getPlanLimits } from './plan-limits';
+import { getPlanLimits, UNLIMITED_PROJECTS } from './plan-limits';
 import { executeHttpRequest } from './http/request-executor';
 import { validateEnvVarName } from './lib/env-var-utils';
-import { buildExecutionPayload, hasUnresolvedVars } from './lib/request-config';
+import { buildExecutionPayload, hasUnresolvedVars, listUnresolvedVars } from './lib/request-config';
 import { tryFormatJson } from './lib/request-utils';
 import {
   parseImportContent,
@@ -62,6 +63,8 @@ import {
   getGitDiff,
   readRepoCollectionsFile,
   setGitRepoPath,
+  getGitRepoPath,
+  defaultGitRepoPath,
   setGitStorageRoot,
 } from './git/git-service';
 import { syncCollectionsToRepo, syncProjectDataToRepo } from './git/collections-sync';
@@ -86,7 +89,7 @@ import { parseRequestConfig } from './domain/request-config';
 import { parseWsdl, type WsdlParseResult } from './soap/wsdl-parser';
 import type { Protocol } from './domain';
 import { createDefaultState } from './defaults';
-import { isLegacySampleProject } from './db/seed-data';
+import { isLegacyMockEnvironment, isLegacyMockProject, variablesForNewEnvironment } from './db/seed-data';
 import { JsonStore, type FallbackProjectData, type FallbackProjectsStore } from './json-store';
 import type { CollectionDto } from './db/project-repository';
 import type { RequestDto } from './db/request-repository';
@@ -97,6 +100,13 @@ const LEGACY_FALLBACK_STATE_KEYS = ['apiwatch.fallbackState', 'apiforge.fallback
 const LEGACY_FALLBACK_PROJECTS_KEYS = ['apiwatch.fallbackProjects', 'apiforge.fallbackProjects'];
 
 const uid = () => Math.random().toString(36).slice(2, 10);
+
+function normalizeSidebarNav(nav?: string): string {
+  if (!nav || nav === 'projects' || nav === 'history' || nav === 'dashboard' || nav === 'import-export') {
+    return 'workspace';
+  }
+  return nav;
+}
 
 function applySoapDefaults(req: ApiRequest): void {
   req.body = DEFAULT_SOAP_ENVELOPE;
@@ -220,20 +230,14 @@ export class ApiService {
 
   private ensureDefaultProject(): void {
     const projects = listProjects();
-    if (projects.length > 0) {
-      this.projectId = getSetting('activeProjectId') ?? projects[0].id;
-      return;
+    if (projects.length === 0) return;
+
+    const activeId = getSetting('activeProjectId');
+    const activeExists = activeId != null && projects.some((p) => p.id === activeId);
+    this.projectId = activeExists ? activeId! : projects[0].id;
+    if (!activeExists) {
+      setSetting('activeProjectId', this.projectId);
     }
-
-    const project = createProject('My API Project', 'Default workspace');
-    this.projectId = project.id;
-    setSetting('activeProjectId', project.id);
-    setSetting('activeEnvironment', 'development');
-
-    const col = createCollection(project.id, 'HTTP Collection', 'http');
-    createRequest(project.id, col.id, 'Get Users', 'GET', '{{BASE_URL}}/users', 'http');
-    createRequest(project.id, col.id, 'Create User', 'POST', '{{BASE_URL}}/users', 'http');
-    upsertEnvVariable(project.id, 'development', 'BASE_URL', 'https://jsonplaceholder.typicode.com');
   }
 
   getActiveProjectId(): string {
@@ -288,7 +292,7 @@ export class ApiService {
           activeGraphqlTab: ui.activeGraphqlTab ?? empty.activeGraphqlTab,
           activeRequestTab: ui.activeRequestTab ?? empty.activeRequestTab,
           activeResponseTab: ui.activeResponseTab ?? empty.activeResponseTab,
-          sidebarNav: ui.sidebarNav === 'history' ? 'projects' : (ui.sidebarNav ?? 'projects'),
+          sidebarNav: normalizeSidebarNav(ui.sidebarNav ?? 'workspace'),
           expandedFolders: ui.expandedFolders ?? empty.expandedFolders,
           searchQuery: ui.searchQuery ?? empty.searchQuery,
         });
@@ -296,7 +300,7 @@ export class ApiService {
       if (!project) throw new Error('No project available');
 
       const environments = listEnvironments(project.id);
-      const activeEnvId = getSetting('activeEnvironment') ?? environments[0]?.id ?? 'development';
+      const activeEnvId = getSetting('activeEnvironment') ?? environments[0]?.id ?? '';
       const envVars = getAllEnvVariablesForProject(project.id);
       const ui = await this.uiStore.loadUi();
       const history = await this.uiStore.loadHistory();
@@ -363,9 +367,9 @@ export class ApiService {
       return {
         tier: 'free',
         tierName: 'Free',
-        maxProjects: 2,
+        maxProjects: UNLIMITED_PROJECTS,
         projectCount: count,
-        canCreateProject: count < 2,
+        canCreateProject: true,
       };
     }
     return getPlanLimits();
@@ -425,23 +429,28 @@ export class ApiService {
     if (!request) throw new Error('Request not found');
 
     const projectId = state.projectId || this.getActiveProjectId();
-    const envId = state.activeEnvironmentId;
+    const envId = state.activeEnvironmentId || state.environments[0]?.id || '';
+    const activeEnv = state.environments.find((e) => e.id === envId);
     const envVars = this.canUseDatabase()
       ? getEnvVariables(projectId, envId).map((v) => ({
           key: v.key,
           value: v.value,
           secret: v.secret,
         }))
-      : Object.entries(
-          state.environments.find((e) => e.id === envId)?.variables ?? {}
-        ).map(([key, value]) => ({ key, value, secret: false }));
+      : Object.entries(activeEnv?.variables ?? {}).map(([key, value]) => ({
+          key,
+          value,
+          secret: false,
+        }));
 
     const config = requestToConfig(request);
     const payload = buildExecutionPayload(config, request.method, request.url, envVars);
 
     if (hasUnresolvedVars(payload.url)) {
+      const unresolved = listUnresolvedVars(payload.url);
+      const envLabel = activeEnv?.name ?? 'your environment';
       throw new Error(
-        'URL contains unresolved variables. Set BASE_URL and other variables in Environments.'
+        `Unresolved URL variable(s): ${unresolved.join(', ')}. Open Environments, select "${envLabel}", and set their values (e.g. BASE_URL = https://api.example.com).`
       );
     }
 
@@ -493,7 +502,6 @@ export class ApiService {
     await this.uiStore.saveUi({
       ...(await this.uiStore.loadUi()),
       ...this.uiStore.extractUiFromState(newState),
-      lastResponse: result,
     });
     return { result, historyEntry, state: newState };
   }
@@ -576,7 +584,6 @@ export class ApiService {
       try {
         const project = createProject(name, description);
         this.setActiveProjectId(project.id);
-        createCollection(project.id, 'HTTP Collection', 'http');
         return project;
       } catch (err) {
         this.markDbUnavailable(err);
@@ -599,6 +606,8 @@ export class ApiService {
   }
 
   deleteProject(id: string) {
+    const wasActive = this.getActiveProjectId() === id;
+
     if (!this.canUseDatabase()) {
       const store = this.loadFallbackProjectsStore();
       const idx = store.projects.findIndex((p) => p.id === id);
@@ -609,16 +618,18 @@ export class ApiService {
         this.projectId = store.activeProjectId;
       }
       this.saveFallbackProjectsStore(store);
+      this.purgeProjectRelatedData(id, wasActive);
       return { success: true, activeProjectId: store.activeProjectId };
     }
 
-    const projects = listProjects();
+    this.clearActiveEnvironmentForProject(id);
     const deleted = deleteProject(id);
     if (!deleted) throw new Error('Project not found');
-    if (this.getActiveProjectId() === id) {
+    if (wasActive) {
       const remaining = listProjects();
       this.setActiveProjectId(remaining[0]?.id ?? '');
     }
+    this.purgeProjectRelatedData(id, wasActive);
     return { success: true, activeProjectId: this.getActiveProjectId() };
   }
 
@@ -842,15 +853,41 @@ export class ApiService {
     return { success: true, imported };
   }
 
-  createEnvironmentInProject(projectId: string, name: string, color: string) {
+  async createEnvironmentInProject(projectId: string, name: string, color: string): Promise<{ id: string }> {
     if (this.canUseDatabase()) {
-      return createEnvironment(projectId, name, color);
+      const created = createEnvironment(projectId, name, color);
+      this.ensureActiveEnvironmentSetting(projectId, created.id);
+      return { id: created.id };
     }
     return this.mutateFallbackEnvironments(async (state) => {
       const id = `env-${Date.now().toString(36)}`;
-      state.environments.push({ id, name: name.trim(), color, variables: {}, includeInExport: true });
+      state.environments.push({
+        id,
+        name: name.trim(),
+        color,
+        variables: variablesForNewEnvironment(),
+        includeInExport: true,
+      });
+      if (
+        !state.activeEnvironmentId ||
+        !state.environments.some((e) => e.id === state.activeEnvironmentId)
+      ) {
+        state.activeEnvironmentId = id;
+      }
       return id;
     });
+  }
+
+  private ensureActiveEnvironmentSetting(projectId: string, newEnvironmentId: string): void {
+    try {
+      const active = getSetting('activeEnvironment');
+      const envs = listEnvironments(projectId);
+      if (!active || !envs.some((e) => e.id === active)) {
+        setSetting('activeEnvironment', newEnvironmentId);
+      }
+    } catch (err) {
+      this.markDbUnavailable(err);
+    }
   }
 
   updateEnvironmentInProject(
@@ -899,7 +936,6 @@ export class ApiService {
       return this.deleteEnvironment(projectId, environmentId);
     }
     return this.mutateFallbackEnvironments(async (state) => {
-      if (state.environments.length <= 1) throw new Error('Cannot delete the last environment');
       const idx = state.environments.findIndex((e) => e.id === environmentId);
       if (idx < 0) throw new Error('Environment not found');
       state.environments.splice(idx, 1);
@@ -1647,30 +1683,143 @@ export class ApiService {
     return { success: true };
   }
 
-  private loadFallbackProjectsStore(): FallbackProjectsStore {
+  private readExplicitFallbackProjectsStore(): FallbackProjectsStore | null {
     const fromFile = this.jsonStore.load();
-    if (fromFile?.projects?.length) {
-      const cleaned = this.stripLegacySampleProjects(fromFile);
-      void this.context.globalState.update(FALLBACK_PROJECTS_KEY, cleaned);
-      return cleaned;
+    if (fromFile !== null) return fromFile;
+
+    const fromGlobal = this.context.globalState.get<FallbackProjectsStore>(FALLBACK_PROJECTS_KEY);
+    if (fromGlobal !== undefined) return fromGlobal;
+
+    for (const key of LEGACY_FALLBACK_PROJECTS_KEYS) {
+      const legacy = this.context.globalState.get<FallbackProjectsStore>(key);
+      if (legacy !== undefined) return legacy;
     }
 
-    const existing =
-      this.context.globalState.get<FallbackProjectsStore>(FALLBACK_PROJECTS_KEY) ??
-      this.getLegacyGlobalState<FallbackProjectsStore>(LEGACY_FALLBACK_PROJECTS_KEYS);
-    if (existing?.projects?.length) {
-      const cleaned = this.stripLegacySampleProjects(existing);
-      this.jsonStore.save(cleaned);
+    return null;
+  }
+
+  private deleteAppSetting(key: string): void {
+    if (this.canUseDatabase()) {
+      try {
+        deleteSetting(key);
+        return;
+      } catch (err) {
+        this.markDbUnavailable(err);
+      }
+    }
+
+    const existing = this.readExplicitFallbackProjectsStore();
+    if (!existing?.settings?.[key]) return;
+    const store = { ...existing, settings: { ...existing.settings } };
+    delete store.settings[key];
+    this.saveFallbackProjectsStore(store);
+  }
+
+  private clearActiveEnvironmentForProject(projectId: string): void {
+    if (!this.canUseDatabase()) return;
+
+    try {
+      const activeEnv = getSetting('activeEnvironment');
+      if (!activeEnv) return;
+      const envs = listEnvironments(projectId);
+      if (envs.some((env) => env.id === activeEnv)) {
+        deleteSetting('activeEnvironment');
+      }
+    } catch (err) {
+      this.markDbUnavailable(err);
+    }
+  }
+
+  private collectProjectStoragePaths(projectId: string): string[] {
+    const paths = new Set<string>();
+    try {
+      const configuredRepo = getGitRepoPath(projectId);
+      if (configuredRepo) paths.add(configuredRepo);
+    } catch {
+      /* ignore */
+    }
+    try {
+      paths.add(defaultGitRepoPath(projectId));
+    } catch {
+      /* ignore */
+    }
+    paths.add(join(this.context.globalStorageUri.fsPath, 'docs-preview', projectId));
+    return [...paths];
+  }
+
+  private removeDirectory(path: string): void {
+    try {
+      if (existsSync(path)) {
+        rmSync(path, { recursive: true, force: true });
+      }
+    } catch (err) {
+      console.error(`[${APP_NAME}] Failed to remove directory ${path}:`, err);
+    }
+  }
+
+  private purgeProjectRelatedData(projectId: string, wasActive: boolean): void {
+    const storagePaths = this.collectProjectStoragePaths(projectId);
+    this.deleteAppSetting(`gitRepoPath:${projectId}`);
+    this.purgeDeletedProjectFromFallback(projectId);
+
+    if (wasActive) {
+      this.deleteAppSetting('activeEnvironment');
+    } else {
+      this.clearActiveEnvironmentForProject(projectId);
+    }
+
+    for (const path of storagePaths) {
+      this.removeDirectory(path);
+    }
+  }
+
+  private purgeDeletedProjectFromFallback(projectId: string): void {
+    const existing = this.readExplicitFallbackProjectsStore();
+    const store: FallbackProjectsStore = existing
+      ? {
+          ...existing,
+          projects: existing.projects.filter((p) => p.id !== projectId),
+        }
+      : { activeProjectId: '', projects: [] };
+
+    if (store.activeProjectId === projectId) {
+      store.activeProjectId = store.projects[0]?.id ?? '';
+    }
+    this.projectId = store.activeProjectId;
+    this.saveFallbackProjectsStore(store);
+
+    const legacyStateKeys = [FALLBACK_STATE_KEY, ...LEGACY_FALLBACK_STATE_KEYS];
+    for (const key of legacyStateKeys) {
+      const saved = this.context.globalState.get<AppState>(key);
+      if (saved?.projectId === projectId) {
+        void this.context.globalState.update(key, undefined);
+      }
+    }
+  }
+
+  private loadFallbackProjectsStore(): FallbackProjectsStore {
+    const explicit = this.readExplicitFallbackProjectsStore();
+    if (explicit !== null) {
+      const cleaned = this.sanitizeFallbackProjectsStore(explicit);
+      if (
+        cleaned.projects.length !== explicit.projects.length ||
+        cleaned.activeProjectId !== explicit.activeProjectId ||
+        JSON.stringify(cleaned.projects) !== JSON.stringify(explicit.projects)
+      ) {
+        this.saveFallbackProjectsStore(cleaned);
+      }
       return cleaned;
     }
 
     const legacy =
       this.context.globalState.get<AppState>(FALLBACK_STATE_KEY) ??
       this.getLegacyGlobalState<AppState>(LEGACY_FALLBACK_STATE_KEYS);
-    if (legacy?.projectId && !isLegacySampleProject({
+    if (legacy?.projectId && !isLegacyMockProject({
       id: legacy.projectId,
       name: legacy.projectName,
       description: legacy.projectDescription,
+      collectionCount: legacy.folders?.length ?? 0,
+      requestCount: legacy.folders?.reduce((n, f) => n + (f.requests?.length ?? 0), 0) ?? 0,
     })) {
       const store: FallbackProjectsStore = {
         activeProjectId: legacy.projectId,
@@ -1692,16 +1841,44 @@ export class ApiService {
     return store;
   }
 
-  private stripLegacySampleProjects(store: FallbackProjectsStore): FallbackProjectsStore {
-    const projects = store.projects.filter((p) => !isLegacySampleProject(p));
-    if (projects.length === store.projects.length) {
-      return store;
-    }
+  private sanitizeFallbackProject(project: FallbackProjectData): FallbackProjectData {
+    const environments = project.environments
+      .filter((env) => !isLegacyMockEnvironment({ id: env.id, name: env.name, variables: env.variables }))
+      .map((env) => ({ ...env }));
+    const activeEnvironmentId = environments.some((e) => e.id === project.activeEnvironmentId)
+      ? project.activeEnvironmentId
+      : (environments[0]?.id ?? '');
+
+    return {
+      ...project,
+      environments,
+      activeEnvironmentId,
+    };
+  }
+
+  private sanitizeFallbackProjectsStore(store: FallbackProjectsStore): FallbackProjectsStore {
+    const projects = store.projects
+      .filter((p) =>
+        !isLegacyMockProject({
+          id: p.id,
+          name: p.name,
+          description: p.description,
+          collectionCount: p.folders.length,
+          requestCount: p.folders.reduce((n, f) => n + f.requests.length, 0),
+        })
+      )
+      .map((p) => this.sanitizeFallbackProject(p));
     const activeProjectId = projects.some((p) => p.id === store.activeProjectId)
       ? store.activeProjectId
       : (projects[0]?.id ?? '');
     const cleaned = { ...store, projects, activeProjectId };
-    this.saveFallbackProjectsStore(cleaned);
+    if (
+      cleaned.projects.length !== store.projects.length ||
+      cleaned.activeProjectId !== store.activeProjectId ||
+      JSON.stringify(cleaned.projects) !== JSON.stringify(store.projects)
+    ) {
+      this.saveFallbackProjectsStore(cleaned);
+    }
     return cleaned;
   }
 
@@ -1734,6 +1911,8 @@ export class ApiService {
   }
 
   private syncFallbackProjectFromState(state: AppState): void {
+    if (!state.projectId?.trim()) return;
+
     const store = this.loadFallbackProjectsStore();
     const idx = store.projects.findIndex((p) => p.id === state.projectId);
     const data: FallbackProjectData = {
@@ -1756,46 +1935,19 @@ export class ApiService {
 
   private createFallbackProject(name: string, description?: string) {
     const store = this.loadFallbackProjectsStore();
-    if (store.projects.length >= 2) {
-      throw new Error('Free plan allows up to 2 projects. Delete a project or upgrade to create more.');
-    }
 
     const trimmedName = name.trim();
     if (!trimmedName) throw new Error('Project name is required');
 
     const id = `proj-${Date.now().toString(36)}`;
+
     const newProject: FallbackProjectData = {
       id,
       name: trimmedName,
       description: description?.trim() ?? '',
-      folders: [{
-        id: `col-${id}-http`,
-        name: 'HTTP Collection',
-        expanded: true,
-        protocol: 'http',
-        requests: [],
-      }],
-      environments: [
-        {
-          id: `env-dev-${id}`,
-          name: 'Development',
-          color: 'green',
-          variables: {
-            BASE_URL: 'https://jsonplaceholder.typicode.com',
-            ACCESS_TOKEN: '',
-            API_KEY: '',
-          },
-          includeInExport: true,
-        },
-        {
-          id: `env-prod-${id}`,
-          name: 'Production',
-          color: 'red',
-          variables: { BASE_URL: 'https://api.example.com' },
-          includeInExport: true,
-        },
-      ],
-      activeEnvironmentId: `env-dev-${id}`,
+      folders: [],
+      environments: [],
+      activeEnvironmentId: '',
     };
 
     store.projects.push(newProject);
@@ -1830,7 +1982,8 @@ export class ApiService {
           projectDescription: active.description,
           folders: active.folders,
           environments: active.environments,
-          activeEnvironmentId: active.activeEnvironmentId,
+          activeEnvironmentId:
+            active.activeEnvironmentId || active.environments[0]?.id || '',
         }
       : createDefaultState();
 
@@ -1847,10 +2000,9 @@ export class ApiService {
       activeGraphqlTab: ui.activeGraphqlTab ?? saved?.activeGraphqlTab ?? base.activeGraphqlTab,
       activeRequestTab: ui.activeRequestTab ?? saved?.activeRequestTab ?? base.activeRequestTab,
       activeResponseTab: ui.activeResponseTab ?? saved?.activeResponseTab ?? base.activeResponseTab,
-      sidebarNav: ui.sidebarNav ?? saved?.sidebarNav ?? base.sidebarNav,
+      sidebarNav: normalizeSidebarNav(ui.sidebarNav ?? saved?.sidebarNav ?? base.sidebarNav),
       expandedFolders: ui.expandedFolders.length ? ui.expandedFolders : saved?.expandedFolders ?? base.expandedFolders,
       searchQuery: ui.searchQuery ?? saved?.searchQuery ?? '',
-      lastResponse: ui.lastResponse ?? saved?.lastResponse,
       performance: ui.performance ?? saved?.performance ?? base.performance,
     });
   }

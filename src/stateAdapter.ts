@@ -148,21 +148,17 @@ export function projectToAppState(
     ui.activeTabId && protocolRequestIds.has(ui.activeTabId)
       ? ui.activeTabId
       : openTabs[0] ?? '';
-
-  const recent = history.slice(0, 20);
+  const recent = history;
   const chartFromHistory = recent
     .slice(0, 12)
     .reverse()
     .map((h) => Math.min(100, Math.max(10, (h.durationMs / 500) * 100)));
-  while (chartFromHistory.length < 12) {
-    chartFromHistory.unshift(30);
-  }
 
   const performance = {
     avgResponseMs: computeAvgResponse(recent.map((h) => h.durationMs)),
     requestsPerSec: parseFloat(computeRequestsPerSec(recent)),
     successRate: computeSuccessRate(recent.map((h) => h.status)),
-    chart: recent.length > 0 ? chartFromHistory : (ui.performance?.chart ?? chartFromHistory),
+    chart: chartFromHistory,
   };
 
   return {
@@ -191,12 +187,11 @@ export function projectToAppState(
     sidebarNav: ui.sidebarNav ?? 'workspace',
     expandedFolders: ui.expandedFolders ?? folders.filter((f) => f.expanded).map((f) => f.id),
     searchQuery: ui.searchQuery ?? '',
-    lastResponse: ui.lastResponse,
     performance,
     projects: [],
     planLimits: {
       tierName: 'Free',
-      maxProjects: 2,
+      maxProjects: Number.MAX_SAFE_INTEGER,
       projectCount: 0,
       canCreateProject: true,
     },

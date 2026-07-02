@@ -34,7 +34,7 @@ export class JsonStore {
         if (!existsSync(path)) continue;
         const raw = readFileSync(path, 'utf-8');
         const parsed = JSON.parse(raw) as FallbackProjectsStore;
-        if (!parsed?.projects?.length) continue;
+        if (!parsed || !Array.isArray(parsed.projects)) continue;
         if (path !== this.filePath()) {
           this.save(parsed);
         }

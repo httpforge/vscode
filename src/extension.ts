@@ -29,10 +29,10 @@ async function getApiService(context: vscode.ExtensionContext): Promise<ApiServi
   return apiService;
 }
 
-async function ensurePanel(context: vscode.ExtensionContext): Promise<void> {
+async function ensurePanel(context: vscode.ExtensionContext, projectId?: string): Promise<void> {
   const api = await getApiService(context);
   const { HttpForgePanel } = await import('./panel');
-  await HttpForgePanel.createOrShow(context.extensionUri, api);
+  await HttpForgePanel.openWithProject(context.extensionUri, api, projectId);
 }
 
 function showLoadError(err: unknown): void {
@@ -41,15 +41,31 @@ function showLoadError(err: unknown): void {
 }
 
 export function activate(context: vscode.ExtensionContext): void {
-  const openPanel = () => {
-    void ensurePanel(context).catch(showLoadError);
+  const refreshPanelIfOpen = async () => {
+    const { HttpForgePanel } = await import('./panel');
+    if (!HttpForgePanel.currentPanel) return;
+    const api = await getApiService(context);
+    const projectId = api.getActiveProjectId();
+    if (projectId) {
+      await HttpForgePanel.currentPanel.loadProjectIntoWorkspace(projectId);
+    } else {
+      await HttpForgePanel.currentPanel.postInit();
+    }
   };
 
+  const openPanel = async (projectId?: string) => {
+    await ensurePanel(context, projectId);
+  };
+
+  const launcherProvider = new HttpForgeLauncherProvider(
+    context.extensionUri,
+    () => getApiService(context),
+    openPanel,
+    refreshPanelIfOpen
+  );
+
   context.subscriptions.push(
-    vscode.window.registerWebviewViewProvider(
-      'httpforge.launcher',
-      new HttpForgeLauncherProvider(context.extensionUri, openPanel)
-    )
+    vscode.window.registerWebviewViewProvider('httpforge.launcher', launcherProvider)
   );
 
   statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
@@ -64,7 +80,18 @@ export function activate(context: vscode.ExtensionContext): void {
       void vscode.commands.executeCommand('workbench.view.extension.httpforge-api');
     }),
 
-    vscode.commands.registerCommand('httpforge.open', openPanel),
+    vscode.commands.registerCommand('httpforge.open', () => {
+      void (async () => {
+        const api = await getApiService(context);
+        const projects = api.listProjects();
+        if (projects.length === 0) {
+          void vscode.commands.executeCommand('workbench.view.extension.httpforge-api');
+          return;
+        }
+        const projectId = api.getActiveProjectId() || projects[0]?.id;
+        await openPanel(projectId);
+      })().catch(showLoadError);
+    }),
 
     vscode.commands.registerCommand('httpforge.sendRequest', () => {
       void (async () => {

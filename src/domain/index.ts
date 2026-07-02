@@ -2,7 +2,7 @@ import type { RequestConfig } from './request-config';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
 
-export type Protocol = 'http' | 'graphql' | 'soap' | 'websocket' | 'grpc' | 'socketio' | 'mqtt' | 'ai' | 'mcp'
+export type Protocol = 'http' | 'graphql' | 'soap' | 'websocket' | 'grpc' | 'socketio' | 'ai' | 'mcp'
 
 export interface ProjectEnvironment {
   id: string

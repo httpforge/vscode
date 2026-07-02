@@ -25,7 +25,7 @@ An open-source alternative to Postman, Insomnia, Bruno, Thunder Client, and Hopp
 
 HttpForge is a developer-first API platform that enables developers to design, test, debug, document, and automate APIs directly inside Visual Studio Code.
 
-Whether you're working with REST APIs, GraphQL services, WebSockets, SOAP integrations, MQTT brokers, or gRPC microservices, HttpForge provides a unified experience with powerful AI assistance.
+Whether you're working with REST APIs, GraphQL services, WebSockets, SOAP integrations, or gRPC microservices, HttpForge provides a unified experience with powerful AI assistance.
 
 ---
 
@@ -89,7 +89,6 @@ HttpForge lives where developers already work — inside VS Code.
 | SOAP | ✅ |
 | WebSocket | ✅ |
 | Server-Sent Events (SSE) | ✅ |
-| MQTT | 🚧 |
 | gRPC | 🚧 |
 | Socket.IO | 🚧 |
 | TCP / UDP | Planned |

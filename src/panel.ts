@@ -108,21 +108,55 @@ export class HttpForgePanel {
 
   ): Promise<void> {
 
+    await HttpForgePanel.openWithProject(extensionUri, api);
+
+  }
+
+
+
+  public static async openWithProject(
+
+    extensionUri: vscode.Uri,
+
+    api: ApiService,
+
+    projectId?: string
+
+  ): Promise<void> {
+
     const column = vscode.window.activeTextEditor
 
       ? vscode.window.activeTextEditor.viewColumn
 
       : undefined;
 
+    const targetProjectId = projectId ?? api.getActiveProjectId();
+
 
 
     if (HttpForgePanel.currentPanel) {
 
+      if (targetProjectId) {
+
+        await HttpForgePanel.currentPanel.loadProjectIntoWorkspace(targetProjectId);
+
+      } else {
+
+        await HttpForgePanel.currentPanel.postInit();
+
+      }
+
       HttpForgePanel.currentPanel.panel.reveal(column);
 
-      await HttpForgePanel.currentPanel.postInit();
-
       return;
+
+    }
+
+
+
+    if (targetProjectId) {
+
+      api.switchProject(targetProjectId);
 
     }
 
@@ -368,11 +402,11 @@ export class HttpForgePanel {
 
     try {
 
-      const { state } = await this.api.executeRequest(this.state, requestId);
+      const { result, historyEntry, state } = await this.api.executeRequest(this.state, requestId);
 
       this.state = state;
 
-      this.postInit();
+      this.post({ type: 'response', result, historyEntry });
 
     } catch (err) {
 
@@ -599,9 +633,33 @@ export class HttpForgePanel {
 
       await this.postInit();
 
+      if (this.state) {
+
+        this.state.projects = this.state.projects.filter((p) => p.id !== projectId);
+
+        this.state.sidebarNav = 'workspace';
+
+        if (this.state.planLimits) {
+
+          this.state.planLimits = {
+
+            ...this.state.planLimits,
+
+            projectCount: this.state.projects.length,
+
+            canCreateProject: true,
+
+          };
+
+        }
+
+      }
+
       this.post({ type: 'success', message: 'Project deleted', state: this.state ?? undefined });
 
     } catch (err) {
+
+      await this.postInit();
 
       this.post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
 
@@ -615,27 +673,41 @@ export class HttpForgePanel {
 
     try {
 
-      this.api.switchProject(projectId);
+      await this.loadProjectIntoWorkspace(projectId);
 
-      await this.postInit();
+    } catch (err) {
 
-      if (this.state) {
+      this.post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
 
-        this.state.sidebarNav = 'workspace';
+    }
+
+  }
+
+
+
+  public async loadProjectIntoWorkspace(projectId: string): Promise<void> {
+
+    const switching = this.state?.projectId !== projectId;
+
+    this.api.switchProject(projectId);
+
+    await this.postInit();
+
+    if (this.state) {
+
+      this.state.sidebarNav = 'workspace';
+
+      if (switching) {
 
         this.state.openTabs = [];
 
         this.state.activeTabId = '';
 
-        await this.api.saveUiFromState(this.state);
-
-        this.postInit();
-
       }
 
-    } catch (err) {
+      await this.api.saveUiFromState(this.state);
 
-      this.post({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      await this.postInit();
 
     }
 
@@ -653,7 +725,7 @@ export class HttpForgePanel {
 
       this.api.ensureProtocolCollection(projectId, normalizedProtocol);
 
-      await this.postInit();
+      this.state = await this.api.buildAppState();
 
       if (!this.state) return;
 
@@ -699,7 +771,7 @@ export class HttpForgePanel {
 
       await this.api.saveUiFromState(this.state);
 
-      this.postInit();
+      this.post({ type: 'init', state: this.state, systemIsDark: isSystemDark(), appInfo: this.getAppInfo() });
 
     } catch (err) {
 
@@ -730,7 +802,7 @@ export class HttpForgePanel {
         normalizedProtocol
       );
 
-      await this.postInit();
+      this.state = await this.api.buildAppState();
 
       if (this.state) {
 
@@ -741,7 +813,7 @@ export class HttpForgePanel {
 
         await this.api.saveUiFromState(this.state);
 
-        this.postInit();
+        this.post({ type: 'init', state: this.state, systemIsDark: isSystemDark(), appInfo: this.getAppInfo() });
 
       }
 
@@ -767,11 +839,11 @@ export class HttpForgePanel {
 
     try {
 
-      const { state } = await this.api.executeGraphQL(this.state, requestId, query, variables);
+      const { result, historyEntry, state } = await this.api.executeGraphQL(this.state, requestId, query, variables);
 
       this.state = state;
 
-      this.postInit();
+      this.post({ type: 'response', result, historyEntry });
 
     } catch (err) {
 
@@ -1246,7 +1318,7 @@ export class HttpForgePanel {
 
 
 
-  private async postInit(): Promise<void> {
+  public async postInit(): Promise<void> {
     try {
       this.state = await this.api.buildAppState();
       this.post({ type: 'init', state: this.state, systemIsDark: isSystemDark(), appInfo: this.getAppInfo() });

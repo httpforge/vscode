@@ -12,7 +12,7 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
     `style-src ${webview.cspSource} 'unsafe-inline'`,
     `font-src ${webview.cspSource}`,
     `script-src 'nonce-${nonce}' https://cdn.tailwindcss.com`,
-    `connect-src https://cdn.tailwindcss.com`,
+    `connect-src https://cdn.tailwindcss.com ws: wss: http: https:`,
     `img-src ${webview.cspSource} data:`,
   ].join('; ');
 
@@ -22,7 +22,6 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
   <meta charset="UTF-8" />
   <meta http-equiv="Content-Security-Policy" content="${csp}" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <link rel="stylesheet" href="${stylesUri}" />
   <script nonce="${nonce}" src="https://cdn.tailwindcss.com"></script>
   <script nonce="${nonce}">
     window.HTTPFORGE_LOGO_URI = '${logoUri}';
@@ -38,8 +37,9 @@ export function getWebviewHtml(webview: vscode.Webview, extensionUri: vscode.Uri
       },
     };
   </script>
+  <link rel="stylesheet" href="${stylesUri}" />
 </head>
-<body class="bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 antialiased overflow-hidden h-screen" style="color-scheme: light dark">
+<body class="hf-app bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 antialiased overflow-hidden h-screen" style="color-scheme: light dark">
   <div id="app" class="h-screen flex flex-col"></div>
   <script nonce="${nonce}" src="${localesUri}"></script>
   <script nonce="${nonce}" src="${scriptUri}"></script>

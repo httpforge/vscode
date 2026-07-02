@@ -3,7 +3,17 @@ import { join } from 'path';
 import { randomUUID } from 'crypto';
 import type Database from 'better-sqlite3';
 import { MIGRATIONS, SCHEMA_VERSION, DEFAULT_ENVIRONMENTS } from './schema';
-import { SEED_PROJECTS, LEGACY_DUMMY_PROJECT_IDS, LEGACY_DUMMY_PROJECT_NAMES } from './seed-data';
+import {
+  SEED_PROJECTS,
+  LEGACY_DUMMY_PROJECT_IDS,
+  LEGACY_DUMMY_PROJECT_NAMES,
+  LEGACY_AUTO_PROJECT_NAME,
+  LEGACY_AUTO_PROJECT_DESCRIPTION,
+  LEGACY_SAMPLE_ENV_URLS,
+  LEGACY_DEFAULT_ENVIRONMENT_IDS,
+  isLegacyMockEnvironment,
+  isLegacyMockProject,
+} from './seed-data';
 import { ensureDefaultEnvironments } from './environment-repository';
 
 let db: Database.Database | null = null;
@@ -75,6 +85,7 @@ export function initDatabase(storagePath: string): void {
     }
 
     purgeLegacySampleProjects();
+    purgeLegacyMockEnvironments();
   } catch (err) {
     db?.close();
     db = null;
@@ -153,16 +164,83 @@ function migrateV5ToV6(): void {
   `);
 }
 
+function purgeLegacyMockEnvironments(): void {
+  const database = getDatabase();
+  const deleteVarsByEnv = database.prepare('DELETE FROM env_variables WHERE project_id = ? AND environment = ?');
+  const deleteEnv = database.prepare('DELETE FROM project_environments WHERE id = ? AND project_id = ?');
+  const listEnvs = database.prepare(
+    'SELECT id, name FROM project_environments WHERE project_id = ? ORDER BY sort_order, name'
+  );
+  const listVars = database.prepare(
+    'SELECT key, value FROM env_variables WHERE project_id = ? AND environment = ? ORDER BY key'
+  );
+  const projects = database.prepare('SELECT id FROM projects').all() as { id: string }[];
+
+  database.transaction(() => {
+    for (const project of projects) {
+      const envs = listEnvs.all(project.id) as { id: string; name: string }[];
+      const removeIds = new Set<string>();
+
+      for (const env of envs) {
+        if ((LEGACY_DEFAULT_ENVIRONMENT_IDS as readonly string[]).includes(env.id)) {
+          removeIds.add(env.id);
+          continue;
+        }
+
+        const vars = listVars.all(project.id, env.id) as { key: string; value: string }[];
+        const variables = Object.fromEntries(vars.map((v) => [v.key, v.value]));
+        if (isLegacyMockEnvironment({ id: env.id, name: env.name, variables })) {
+          removeIds.add(env.id);
+        }
+      }
+
+      for (const envId of removeIds) {
+        deleteVarsByEnv.run(project.id, envId);
+        deleteEnv.run(envId, project.id);
+      }
+    }
+
+    const active = database.prepare("SELECT value FROM app_settings WHERE key = 'activeEnvironment'").get() as
+      | { value: string }
+      | undefined;
+    if (active?.value) {
+      const stillExists = database.prepare('SELECT id FROM project_environments WHERE id = ?').get(active.value);
+      if (!stillExists) {
+        database.prepare("DELETE FROM app_settings WHERE key = 'activeEnvironment'").run();
+      }
+    }
+  })();
+}
+
 function purgeLegacySampleProjects(): void {
   const database = getDatabase();
   const deleteById = database.prepare('DELETE FROM projects WHERE id = ?');
   const deleteByName = database.prepare('DELETE FROM projects WHERE name = ?');
   const deleteByDescription = database.prepare("DELETE FROM projects WHERE description = 'Sample API project'");
+  const deleteAutoProject = database.prepare('DELETE FROM projects WHERE name = ?');
+  const clearSampleEnvUrl = database.prepare(
+    "UPDATE env_variables SET value = '' WHERE key = 'BASE_URL' AND value = ?"
+  );
+  const emptyMockProjects = database.prepare(`
+    SELECT p.id FROM projects p
+    WHERE trim(p.description) = ''
+      AND NOT EXISTS (SELECT 1 FROM collections c WHERE c.project_id = p.id)
+      AND NOT EXISTS (
+        SELECT 1 FROM api_requests r
+        JOIN collections c ON r.collection_id = c.id
+        WHERE c.project_id = p.id
+      )
+  `);
 
   database.transaction(() => {
     for (const id of LEGACY_DUMMY_PROJECT_IDS) deleteById.run(id);
     for (const name of LEGACY_DUMMY_PROJECT_NAMES) deleteByName.run(name);
     deleteByDescription.run();
+    deleteAutoProject.run(LEGACY_AUTO_PROJECT_NAME);
+    for (const row of emptyMockProjects.all() as { id: string }[]) {
+      deleteById.run(row.id);
+    }
+    for (const url of LEGACY_SAMPLE_ENV_URLS) clearSampleEnvUrl.run(url);
 
     const active = database.prepare("SELECT value FROM app_settings WHERE key = 'activeProjectId'").get() as
       | { value: string }
@@ -291,8 +369,8 @@ function seedDatabase(): void {
   seed();
 }
 
-export function seedDefaultEnvVars(projectId: string): void {
-  ensureDefaultEnvironments(projectId, DEFAULT_ENVIRONMENTS);
+export function seedDefaultEnvVars(_projectId: string): void {
+  /* no-op — environments are created by the user */
 }
 
 export function closeDatabase(): void {

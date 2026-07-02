@@ -9,7 +9,7 @@
     name: 'HttpForge',
     version: '0.1.17',
     tagline: 'Open Source IDE for Exploring and Testing APIs',
-    openSourceTagline: 'Privacy First · Lightweight alternative to Postman, Insomnia & Bruno',
+    openSourceTagline: 'Privacy-First API Development and Testing Platform',
     description: 'HttpForge is an open-source VS Code extension for API development and testing.',
     platform: 'VS Code Extension · Open Source',
     publisher: 'httpforge',
@@ -42,8 +42,11 @@
   let saveTimer = null;
   let requestDeletePending = false;
   let collectionDeletePending = false;
+  let projectDeletePending = false;
   /** @type {string | null} */
   let editingRequestTitleId = null;
+  /** @type {string | null} */
+  let editingCollectionNameId = null;
 
   const RESPONSE_PANEL_DEFAULT = 384;
   const RESPONSE_PANEL_MIN = 260;
@@ -69,7 +72,7 @@
   };
 
   const VALID_PROTOCOLS = new Set([
-    'http', 'graphql', 'soap', 'websocket', 'grpc', 'socketio', 'mqtt', 'ai', 'mcp',
+    'http', 'graphql', 'soap', 'websocket', 'grpc', 'socketio', 'ai', 'mcp',
   ]);
 
   const PROTOCOLS = [
@@ -78,7 +81,6 @@
     { id: 'websocket', name: 'WebSocket', color: '#CA8A04', icon: '⚡' },
     { id: 'grpc', name: 'gRPC', color: '#16A34A', icon: '⬡' },
     { id: 'soap', name: 'SOAP', color: '#9333EA', icon: '📄' },
-    { id: 'mqtt', name: 'MQTT', color: '#0284C7', icon: '📡' },
   ];
 
   const DEFAULT_GRAPHQL_QUERY = '# Enter your GraphQL query\nquery {\n  \n}';
@@ -148,6 +150,8 @@
 
   /** @type {Record<string, string[]>} */
   let wsMessages = {};
+  /** @type {Record<string, WebSocket>} */
+  let wsSockets = {};
 
   /** @type {Record<string, boolean>} */
   let kvBulkEditMode = {};
@@ -258,7 +262,6 @@
     const blob = (path) => `${github.replace(/\/$/, '')}/blob/main/${path}`;
     const links = appInfo.docLinks ?? {};
     const items = [
-      { id: 'release-notes', label: 'Release Notes', href: links.releaseNotes ?? blob('CHANGELOG.md') },
       { id: 'learning-center', label: 'Learning Center', href: links.learningCenter ?? blob('README.md') },
       { id: 'support', label: 'Support Center', href: links.support ?? `${github}/issues` },
       { id: 'security', label: 'Security', href: links.security ?? blob('SECURITY.md') },
@@ -318,6 +321,7 @@
     const p = normalizeProtocol(protocol);
     if (!state || p === normalizeProtocol(state.activeProtocol)) return;
     editingRequestTitleId = null;
+    editingCollectionNameId = null;
     sending = false;
     state.activeProtocol = p;
     state.openTabs = [];
@@ -359,8 +363,6 @@
         return '{{BASE_URL}}/soap';
       case 'grpc':
         return '{{BASE_URL}}/grpc';
-      case 'mqtt':
-        return '{{BASE_URL}}/mqtt';
       default:
         return '{{BASE_URL}}/';
     }
@@ -376,8 +378,6 @@
         return 'Untitled WebSocket';
       case 'grpc':
         return 'Untitled gRPC Call';
-      case 'mqtt':
-        return 'Untitled MQTT Message';
       default:
         return 'Untitled Request';
     }
@@ -396,8 +396,6 @@
         return `<svg class="${className}" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 2.2 12.6 4.9v5.2L8 12.8 3.4 10.1V4.9L8 2.2z" fill="${c}" opacity="0.95"/><path d="M8 4.6 10.8 6.2v3.6L8 11.4 5.2 9.8V6.2L8 4.6z" fill="#fff" opacity="0.92"/></svg>`;
       case 'soap':
         return `<svg class="${className}" viewBox="0 0 16 16" aria-hidden="true"><path d="M4.5 2.8h7a1.2 1.2 0 0 1 1.2 1.2v8a1.2 1.2 0 0 1-1.2 1.2h-7a1.2 1.2 0 0 1-1.2-1.2v-8a1.2 1.2 0 0 1 1.2-1.2z" fill="none" stroke="${c}" stroke-width="1.15"/><path d="M5.6 5.4h4.8M5.6 8h4.8M5.6 10.6h3.1" fill="none" stroke="${c}" stroke-width="1.1" stroke-linecap="round"/></svg>`;
-      case 'mqtt':
-        return `<svg class="${className}" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 12.8c2.6 0 4.7-1.6 4.7-3.6S10.6 5.6 8 5.6 3.3 7.2 3.3 9.2s2.1 3.6 4.7 3.6z" fill="none" stroke="${c}" stroke-width="1.15"/><path d="M8 3.6V2.2M5.4 4.3 4.4 3.2M10.6 4.3 11.6 3.2" fill="none" stroke="${c}" stroke-width="1.1" stroke-linecap="round"/><circle cx="8" cy="9.2" r="1.1" fill="${c}"/></svg>`;
       default:
         return `<svg class="${className}" viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="4" fill="${c}"/></svg>`;
     }
@@ -420,6 +418,11 @@
       </div>`;
   }
 
+  function renderProjectName() {
+    const projectName = (state.projectName || '').trim() || t('settings.project');
+    return `<span class="header-project-name" title="${escapeHtml(projectName)}">${escapeHtml(projectName)}</span>`;
+  }
+
   function renderProtocolTabs() {
     const active = normalizeProtocol(state.activeProtocol);
     const tabs = PROTOCOLS.map((p, index) => {
@@ -427,7 +430,7 @@
       const divider = index > 0 ? '<span class="header-protocol-divider" aria-hidden="true"></span>' : '';
       return `${divider}<button type="button" data-action="set-protocol" data-protocol="${p.id}" class="header-protocol-tab${isActive ? ' is-active' : ''}" style="--protocol-color:${p.color}" aria-current="${isActive ? 'page' : 'false'}">${renderProtocolIconSvg(p.id, p.color)}<span class="header-protocol-label">${p.name}</span></button>`;
     }).join('');
-    return `<div class="header-protocol-tabs">${tabs}</div>`;
+    return `<div class="header-protocol-bar"><div class="header-protocol-tabs">${tabs}</div></div>`;
   }
 
   function explorerMethodLabel(r) {
@@ -436,14 +439,12 @@
     if (rp === 'soap') return 'SOAP';
     if (rp === 'websocket') return 'WS';
     if (rp === 'grpc') return 'RPC';
-    if (rp === 'mqtt') return 'MQTT';
     if (r.method === 'DELETE') return 'DEL';
     return r.method;
   }
 
-  function renderBuilderTitleInput(req) {
-    const placeholder = defaultNameForProtocol(getRequestProtocol(req));
-    return `<input data-action="set-request-name" type="text" value="${escapeHtml(req.name)}" class="request-builder-title-input shrink-0 min-w-[8rem] max-w-[14rem] px-2 py-1.5 text-sm border border-gray-200 dark:border-gray-700 dark:bg-gray-800 rounded-lg" placeholder="${escapeHtml(placeholder)}" title="Request name" />`;
+  function renderBuilderTitleInput(_req) {
+    return '';
   }
 
   function renderBuilderProtocolChip(req) {
@@ -493,9 +494,11 @@
   function applyThemeClass() {
     if (isDarkMode()) {
       document.documentElement.classList.add('dark');
+      document.documentElement.dataset.theme = 'dark';
       document.documentElement.style.colorScheme = 'dark';
     } else {
       document.documentElement.classList.remove('dark');
+      document.documentElement.dataset.theme = 'light';
       document.documentElement.style.colorScheme = 'light';
     }
     applyLanguage();
@@ -546,19 +549,53 @@
   }
 
   function persistState() {
-    if (requestDeletePending || collectionDeletePending) return;
+    if (requestDeletePending || collectionDeletePending || projectDeletePending) return;
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      if (requestDeletePending || collectionDeletePending) return;
-      commitBulkEditForTable('params', false);
-      commitBulkEditForTable('headers', false);
-      for (const folder of state?.folders ?? []) {
-        for (const req of folder.requests) {
-          syncRequestConfigFromLegacy(req);
-        }
+    saveTimer = setTimeout(flushPersistState, 300);
+  }
+
+  function flushPersistState() {
+    if (requestDeletePending || collectionDeletePending || projectDeletePending) return;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    if (!state) return;
+    commitBulkEditForTable('params', false);
+    commitBulkEditForTable('headers', false);
+    for (const folder of state.folders ?? []) {
+      for (const req of folder.requests) {
+        syncRequestConfigFromLegacy(req);
       }
-      vscode.postMessage({ type: 'saveState', state });
-    }, 300);
+    }
+    vscode.postMessage({ type: 'saveState', state });
+  }
+
+  function commitNewEnvVarFromInputs(envId, options = {}) {
+    const { clearInputs = false, renderAfter = false, notifyDuplicate = false } = options;
+    const env = state?.environments.find((e) => e.id === envId);
+    if (!env) return false;
+    const keyInput = document.querySelector(`[data-action="new-env-var-key"][data-env-id="${envId}"]`);
+    const valueInput = document.querySelector(`[data-action="new-env-var-value"][data-env-id="${envId}"]`);
+    const rawKey = keyInput?.value?.trim() ?? '';
+    if (!rawKey) return false;
+    const check = validateEnvVarName(rawKey);
+    if (!check.valid) {
+      vscode.postMessage({ type: 'notify', message: check.error, level: 'error' });
+      return false;
+    }
+    if (Object.prototype.hasOwnProperty.call(env.variables, check.normalized)) {
+      if (notifyDuplicate) {
+        vscode.postMessage({ type: 'notify', message: `Variable "${check.normalized}" already exists`, level: 'error' });
+      }
+      return false;
+    }
+    env.variables[check.normalized] = valueInput?.value ?? '';
+    if (clearInputs) {
+      if (keyInput) keyInput.value = '';
+      if (valueInput) valueInput.value = '';
+    }
+    flushPersistState();
+    if (renderAfter) render();
+    return true;
   }
 
   function ensureRequestConfig(req) {
@@ -729,7 +766,20 @@
   }
 
   function getActiveEnv() {
-    return state?.environments.find((e) => e.id === state.activeEnvironmentId);
+    if (!state?.environments?.length) return null;
+    const active = state.environments.find((e) => e.id === state.activeEnvironmentId);
+    return active ?? state.environments[0] ?? null;
+  }
+
+  function listUnresolvedEnvVars(text) {
+    const env = getActiveEnv();
+    const names = [];
+    const re = /\{\{([^}]+)\}\}/g;
+    let match;
+    while ((match = re.exec(text ?? '')) !== null) {
+      names.push(match[1].trim());
+    }
+    return names.filter((name) => !env?.variables?.[name]?.trim());
   }
 
   function isEnvIncludedInExport(env) {
@@ -1585,7 +1635,132 @@
       <button type="button" data-action="tab-menu" data-tab-cmd="force-close-all" class="tab-menu-item"${state.openTabs.length ? '' : ' disabled'}>Force Close All Tabs</button>`;
   }
 
+  function initGraphqlRequest(req) {
+    if (!req.graphqlQuery?.trim()) {
+      req.graphqlQuery = DEFAULT_GRAPHQL_QUERY;
+    }
+    if (!req.graphqlVariables?.trim()) {
+      req.graphqlVariables = '{}';
+    }
+    req.method = 'POST';
+  }
+
+  function ensureActiveRequestDefaults() {
+    const req = getActiveRequest();
+    if (!req) return;
+    if (getRequestProtocol(req) === 'graphql') {
+      initGraphqlRequest(req);
+    }
+    if (getRequestProtocol(req) === 'soap') {
+      initSoapRequest(req);
+    }
+  }
+
+  function resolveEnvVarsInText(text) {
+    const env = getActiveEnv();
+    return String(text ?? '').replace(/\{\{([^}]+)\}\}/g, (_, name) => {
+      const key = name.trim();
+      return env?.variables?.[key]?.trim() ?? `{{${key}}}`;
+    });
+  }
+
+  function resolveWebSocketUrl(rawUrl) {
+    let url = resolveEnvVarsInText(rawUrl).trim();
+    if (!url || /\{\{[^}]+\}\}/.test(url)) return url;
+    if (!/^wss?:\/\//i.test(url)) {
+      url = url.replace(/^https:\/\//i, 'wss://').replace(/^http:\/\//i, 'ws://');
+      if (!/^wss?:\/\//i.test(url)) {
+        url = `ws://${url.replace(/^\/+/, '')}`;
+      }
+    }
+    return url;
+  }
+
+  function pushWsMessage(requestId, message) {
+    if (!wsMessages[requestId]) wsMessages[requestId] = [];
+    wsMessages[requestId].push(message);
+  }
+
+  function connectWebSocket(req) {
+    const unresolved = listUnresolvedEnvVars(req.url);
+    if (unresolved.length) {
+      const env = getActiveEnv();
+      const envLabel = env?.name ?? 'your environment';
+      vscode.postMessage({
+        type: 'notify',
+        message: `Unresolved URL variable(s): ${unresolved.join(', ')}. Open Environments, select "${envLabel}", and set their values (e.g. BASE_URL = https://api.example.com).`,
+        level: 'error',
+      });
+      return;
+    }
+    const url = resolveWebSocketUrl(req.url);
+    if (!url) {
+      vscode.postMessage({ type: 'notify', message: 'Enter a WebSocket URL.', level: 'error' });
+      return;
+    }
+    if (wsSockets[req.id]?.readyState === WebSocket.OPEN) {
+      pushWsMessage(req.id, { type: 'system', content: 'Already connected' });
+      render();
+      return;
+    }
+    if (wsSockets[req.id]) {
+      try {
+        wsSockets[req.id].close();
+      } catch {
+        /* ignore */
+      }
+    }
+    pushWsMessage(req.id, { type: 'system', content: `Connecting to ${url}...` });
+    render();
+    try {
+      const ws = new WebSocket(url);
+      wsSockets[req.id] = ws;
+      ws.onopen = () => {
+        pushWsMessage(req.id, { type: 'system', content: 'Connected' });
+        render();
+      };
+      ws.onmessage = (event) => {
+        pushWsMessage(req.id, { type: 'received', content: String(event.data) });
+        render();
+      };
+      ws.onerror = () => {
+        pushWsMessage(req.id, { type: 'system', content: 'Connection error' });
+        render();
+      };
+      ws.onclose = (event) => {
+        pushWsMessage(req.id, {
+          type: 'system',
+          content: `Disconnected (${event.code}${event.reason ? `: ${event.reason}` : ''})`,
+        });
+        delete wsSockets[req.id];
+        render();
+      };
+    } catch (err) {
+      pushWsMessage(req.id, {
+        type: 'system',
+        content: `Failed: ${err instanceof Error ? err.message : String(err)}`,
+      });
+      render();
+    }
+  }
+
+  function disconnectWebSocket(req) {
+    const ws = wsSockets[req.id];
+    if (ws) {
+      try {
+        ws.close();
+      } catch {
+        /* ignore */
+      }
+      delete wsSockets[req.id];
+    }
+    pushWsMessage(req.id, { type: 'system', content: 'Disconnected' });
+    render();
+  }
+
   function renderGraphQLPlayground(req) {
+    initGraphqlRequest(req);
+    const query = req.graphqlQuery ?? DEFAULT_GRAPHQL_QUERY;
     const variables = req.graphqlVariables ?? '{}';
     const gqlTabs = [
       ['query', 'Query'],
@@ -1775,11 +1950,42 @@
       <div class="flex-1 flex flex-col min-h-0 overflow-hidden">${editorContent}</div>`;
   }
 
+  function renderGrpcBuilder(req) {
+    req.method = 'POST';
+    const config = ensureRequestConfig(req);
+    if (!config.bodyType || config.bodyType === 'none') {
+      config.bodyType = 'json';
+      req.bodyType = 'json';
+    }
+    if (!req.body?.trim()) {
+      req.body = '{}';
+      config.body = req.body;
+    }
+
+    return `
+      <div class="flex items-center gap-2 p-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <span class="text-green-600 font-bold text-sm">POST</span>
+        ${renderBuilderTitleInput(req)}
+        <span class="text-xs text-green-600 font-medium px-2 py-0.5 bg-green-50 dark:bg-green-900/30 rounded">gRPC</span>
+      </div>
+      <div class="flex items-center gap-2 p-3 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <input data-action="set-url" data-env-autocomplete="1" type="text" value="${escapeHtml(req.url)}" class="flex-1 px-3 py-2 text-sm border border-gray-200 dark:border-gray-700 dark:bg-gray-800 rounded-lg font-mono focus:outline-none focus:ring-2 focus:ring-green-500" placeholder="{{BASE_URL}}/package.Service/Method" />
+        <button data-action="send" class="flex items-center gap-1 px-5 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg disabled:opacity-50" ${sending ? 'disabled' : ''}>
+          ${sending ? 'Invoking...' : '▶ Invoke'}
+        </button>
+      </div>
+      <div class="flex-1 flex flex-col min-h-0 overflow-hidden p-4 gap-2">
+        <p class="text-xs text-gray-400">Uses HTTP POST for gRPC-Gateway / gRPC-Web endpoints. Native gRPC (HTTP/2 + protobuf) is not supported yet.</p>
+        <textarea data-action="set-body" data-env-autocomplete="1" class="flex-1 w-full p-4 font-mono text-sm bg-slate-900 text-slate-100 resize-none focus:outline-none min-h-[200px]" spellcheck="false" placeholder="{}">${escapeHtml(req.body ?? '{}')}</textarea>
+      </div>`;
+  }
+
   function renderRequestBuilder(req) {
     const protocol = getRequestProtocol(req);
     if (protocol === 'graphql') return renderGraphQLPlayground(req);
     if (protocol === 'soap') return renderSOAPBuilder(req);
     if (protocol === 'websocket') return renderWebSocketBuilder(req);
+    if (protocol === 'grpc') return renderGrpcBuilder(req);
 
     const headerCount = req.headers.filter((h) => h.enabled && h.key).length;
     const config = ensureRequestConfig(req);
@@ -1894,6 +2100,103 @@
     return `<div class="p-4 text-sm text-gray-400">Select a tab above</div>`;
   }
 
+  function getResponseDownloadPayload() {
+    const resp = state.lastResponse;
+    if (!resp) return null;
+
+    const tab = state.activeResponseTab;
+    const activeReq = getActiveRequest();
+    const isSoap = getRequestProtocol(activeReq) === 'soap';
+    const isXml = isXmlContent(resp.body, resp.headers);
+    const statusPrefix = resp.status ? `response-${resp.status}` : 'response';
+
+    if (tab === 'headers') {
+      return {
+        content: Object.entries(resp.headers)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join('\n'),
+        filename: `${statusPrefix}-headers.txt`,
+        mime: 'text/plain',
+      };
+    }
+
+    if (tab === 'timeline') {
+      return {
+        content: JSON.stringify(
+          {
+            status: resp.status,
+            statusText: resp.statusText,
+            durationMs: resp.durationMs,
+            timeline: resp.timeline ?? [],
+          },
+          null,
+          2
+        ),
+        filename: `${statusPrefix}-timeline.json`,
+        mime: 'application/json',
+      };
+    }
+
+    if (tab === 'tree') {
+      return {
+        content: resp.body,
+        filename: `${statusPrefix}.xml`,
+        mime: 'application/xml',
+      };
+    }
+
+    if (tab === 'xml' || (tab === 'json' && isSoap && isXml)) {
+      return {
+        content: formatXml(resp.body),
+        filename: `${statusPrefix}.xml`,
+        mime: 'application/xml',
+      };
+    }
+
+    if (tab === 'json') {
+      const looksJson =
+        resp.headers['content-type']?.includes('json') ||
+        resp.body.trim().startsWith('{') ||
+        resp.body.trim().startsWith('[');
+      if (looksJson) {
+        try {
+          return {
+            content: JSON.stringify(JSON.parse(resp.body), null, 2),
+            filename: `${statusPrefix}.json`,
+            mime: 'application/json',
+          };
+        } catch {
+          /* fall through to raw body */
+        }
+      }
+      return {
+        content: resp.body,
+        filename: `${statusPrefix}.txt`,
+        mime: 'text/plain',
+      };
+    }
+
+    return {
+      content: resp.body,
+      filename: `${statusPrefix}.txt`,
+      mime: 'text/plain',
+    };
+  }
+
+  function downloadResponse() {
+    const payload = getResponseDownloadPayload();
+    if (!payload) return;
+
+    const blob = new Blob([payload.content], { type: payload.mime });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = payload.filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    vscode.postMessage({ type: 'notify', message: `Downloaded ${payload.filename}`, level: 'success' });
+  }
+
   function renderResponseContent() {
     const resp = state.lastResponse;
     const tab = state.activeResponseTab;
@@ -1910,12 +2213,17 @@
       return `
         <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
           <button data-action="copy-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Copy">📋</button>
+          <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
           <button data-action="format-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Format">≡</button>
         </div>
         <pre class="response-json-view soap-xml-view">${highlightXml(pretty)}</pre>`;
     }
     if (tab === 'tree') {
-      return `<div class="flex-1 overflow-auto p-3">${renderXmlTree(resp.body)}</div>`;
+      return `
+        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+          <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
+        </div>
+        <div class="flex-1 overflow-auto p-3">${renderXmlTree(resp.body)}</div>`;
     }
 
     if (tab === 'json') {
@@ -1924,21 +2232,35 @@
       return `
         <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
           <button data-action="copy-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Copy">📋</button>
+          <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
           <button data-action="format-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Format">≡</button>
         </div>
         <pre class="response-json-view">${content}</pre>`;
     }
     if (tab === 'raw') {
-      return `<pre class="response-raw-view">${escapeHtml(resp.body)}</pre>`;
+      return `
+        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+          <button data-action="copy-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Copy">📋</button>
+          <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
+        </div>
+        <pre class="response-raw-view">${escapeHtml(resp.body)}</pre>`;
     }
     if (tab === 'headers') {
       const rows = Object.entries(resp.headers)
         .map(([k, v]) => `<tr class="border-b border-gray-50 dark:border-gray-800"><td class="px-3 py-1.5 font-mono text-xs font-medium">${escapeHtml(k)}</td><td class="px-3 py-1.5 font-mono text-xs text-gray-600 dark:text-gray-400">${escapeHtml(v)}</td></tr>`)
         .join('');
-      return `<div class="flex-1 overflow-auto"><table class="w-full text-sm"><tbody>${rows}</tbody></table></div>`;
+      return `
+        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+          <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download headers">${iconSvg('export')}</button>
+        </div>
+        <div class="flex-1 overflow-auto"><table class="w-full text-sm"><tbody>${rows}</tbody></table></div>`;
     }
     if (tab === 'timeline') {
-      return `<div class="flex-1 p-4">${renderTimeline(resp.timeline)}</div>`;
+      return `
+        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+          <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download timeline">${iconSvg('export')}</button>
+        </div>
+        <div class="flex-1 p-4">${renderTimeline(resp.timeline)}</div>`;
     }
     return '';
   }
@@ -2129,8 +2451,6 @@
 
   function renderDeleteEnvironmentModal() {
     if (!deleteEnvironmentModal) return '';
-    const envCount = state?.environments?.length ?? 0;
-    const isLast = envCount <= 1;
     const name = deleteEnvironmentModal.name ?? 'this environment';
 
     return `
@@ -2147,13 +2467,11 @@
             <button data-action="delete-env-modal-close" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500">✕</button>
           </div>
           <div class="p-6">
-            ${isLast
-              ? `<p class="text-sm text-gray-600 dark:text-gray-400"><strong>${escapeHtml(name)}</strong> is your only environment. You must have at least one — create another before deleting this one.</p>`
-              : `<p class="text-sm text-gray-600 dark:text-gray-400">Are you sure you want to delete <strong>${escapeHtml(name)}</strong>? All variables in this environment will be permanently removed.</p>`}
+            <p class="text-sm text-gray-600 dark:text-gray-400">Are you sure you want to delete <strong>${escapeHtml(name)}</strong>? All variables in this environment will be permanently removed.</p>
           </div>
           <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50">
             <button data-action="delete-env-modal-close" class="px-4 py-2 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">Cancel</button>
-            <button data-action="delete-env-modal-submit" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50" ${isLast ? 'disabled' : ''}>Delete Environment</button>
+            <button data-action="delete-env-modal-submit" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium">Delete Environment</button>
           </div>
         </div>
       </div>`;
@@ -2177,8 +2495,6 @@
 
   function renderDeleteProjectModal() {
     if (!deleteProjectModal) return '';
-    const projects = state?.projects ?? [];
-    const isLast = false;
     const name = deleteProjectModal.name ?? 'this project';
 
     return `
@@ -2195,13 +2511,11 @@
             <button data-action="delete-project-modal-close" class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500">✕</button>
           </div>
           <div class="p-6">
-            ${isLast
-              ? `<p class="text-sm text-gray-600 dark:text-gray-400"><strong>${escapeHtml(name)}</strong> is your only project. You must have at least one project — create another before deleting this one.</p>`
-              : `<p class="text-sm text-gray-600 dark:text-gray-400">Are you sure you want to delete <strong>${escapeHtml(name)}</strong>? All collections, requests, and environment variables for this project will be permanently removed.</p>`}
+            <p class="text-sm text-gray-600 dark:text-gray-400">Are you sure you want to delete <strong>${escapeHtml(name)}</strong>? All collections, requests, and environment variables for this project will be permanently removed.</p>
           </div>
           <div class="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 dark:border-gray-700 bg-gray-50/50 dark:bg-gray-800/50">
             <button data-action="delete-project-modal-close" class="px-4 py-2 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-800">Cancel</button>
-            <button data-action="delete-project-modal-submit" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium disabled:opacity-50" ${isLast ? 'disabled' : ''}>Delete Project</button>
+            <button data-action="delete-project-modal-submit" class="px-4 py-2 text-sm bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium">Delete Project</button>
           </div>
         </div>
       </div>`;
@@ -2219,9 +2533,37 @@
 
   function submitDeleteProjectModal() {
     if (!deleteProjectModal) return;
-    if ((state?.projects ?? []).length <= 1) return;
-    vscode.postMessage({ type: 'deleteProject', projectId: deleteProjectModal.id });
-    closeDeleteProjectModal();
+    const projectId = deleteProjectModal.id;
+    clearTimeout(saveTimer);
+    saveTimer = null;
+    projectDeletePending = true;
+
+    state.projects = (state.projects ?? []).filter((p) => p.id !== projectId);
+    if (state.projectId === projectId) {
+      const next = state.projects[0];
+      state.projectId = next?.id ?? '';
+      state.projectName = next?.name ?? '';
+      state.projectDescription = next?.description ?? '';
+      if (!next) {
+        state.folders = [];
+        state.openTabs = [];
+        state.activeTabId = '';
+        state.environments = [];
+        state.activeEnvironmentId = '';
+      }
+    }
+    if (state.planLimits) {
+      state.planLimits = {
+        ...state.planLimits,
+        projectCount: state.projects.length,
+        canCreateProject: true,
+      };
+    }
+    state.sidebarNav = 'workspace';
+
+    deleteProjectModal = null;
+    render();
+    vscode.postMessage({ type: 'deleteProject', projectId });
   }
 
   function renderProjectModal() {
@@ -2400,73 +2742,16 @@
     vscode.postMessage({ type: 'deleteCollection', collectionId });
   }
 
-  function renderProjectsPage() {
-    const projects = state.projects ?? [];
-
-    const cards = projects.map((p) => {
-      const isActive = p.id === state.projectId;
-      const canDelete = true;
-      const deleteTitle = 'Delete project';
-      return `
-        <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5 transition-all ${isActive ? 'ring-2 ring-blue-500 shadow-md' : 'hover:border-blue-300 dark:hover:border-blue-700'}">
-          <div class="flex items-start justify-between gap-3 mb-3">
-            <button type="button" data-action="open-project" data-project-id="${p.id}" class="font-semibold text-lg truncate text-left flex-1 min-w-0 hover:text-blue-600 dark:hover:text-blue-400 ${isActive ? 'text-blue-700 dark:text-blue-300' : ''}" title="${isActive ? t('projects.openWorkspace') : t('projects.open')}">${escapeHtml(p.name)}</button>
-            <div class="flex items-center gap-2 shrink-0">
-              ${isActive ? '<span class="text-xs px-2 py-0.5 rounded-md bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300 font-semibold">Active</span>' : ''}
-              ${iconActionGroup(
-                iconActionBtn(
-                  `data-action="edit-project" data-project-id="${p.id}" data-project-name="${escapeHtml(p.name)}" data-project-description="${escapeHtml(p.description || '')}"`,
-                  'edit',
-                  'Edit project'
-                ) +
-                iconActionBtn(
-                  `data-action="delete-project" data-project-id="${p.id}" data-project-name="${escapeHtml(p.name)}"`,
-                  'delete',
-                  deleteTitle
-                )
-              )}
-            </div>
-          </div>
-          <p class="text-sm text-gray-500 mb-4 line-clamp-2 min-h-[2.5rem]">${escapeHtml(p.description || 'No description')}</p>
-          <div class="flex gap-4 text-xs text-gray-400">
-            <span>${p.collectionCount ?? 0} collections</span>
-            <span>${p.requestCount ?? 0} requests</span>
-          </div>
-        </div>`;
-    }).join('');
-
-    return `
-      <div class="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-950 relative">
-        <div class=" mx-auto">
-          <div class="flex flex-wrap items-center justify-between gap-4 mb-6">
-            <div>
-              <h1 class="page-title">${t('projects.title')}</h1>
-              <p class="text-sm text-gray-500 mt-1">${t('projects.subtitle')}</p>
-            </div>
-            <button data-action="new-project" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">${t('projects.newProject')}</button>
-          </div>
-          ${projects.length === 0
-            ? `<div class="text-center py-16 text-gray-400">
-                <div class="text-4xl mb-4">📂</div>
-                <p class="text-lg mb-2">${t('projects.noProjects')}</p>
-                <p class="text-sm mb-4">${t('projects.noProjectsDesc')}</p>
-                <button data-action="new-project" class="px-4 py-2 bg-blue-600 text-white text-sm rounded-lg">${t('projects.newProject')}</button>
-              </div>`
-            : `<div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">${cards}</div>`}
-        </div>
-        ${renderProjectModal()}
-        ${renderDeleteProjectModal()}
-      </div>`;
-  }
-
   function renderPageContent() {
-    switch (state.sidebarNav) {
+    const nav =
+      state.sidebarNav === 'projects' || state.sidebarNav === 'history'
+        ? 'workspace'
+        : state.sidebarNav;
+    switch (nav) {
       case 'environments':
         return renderEnvironmentsPage();
       case 'collections':
         return renderCollectionsPage();
-      case 'import-export':
-        return renderImportExportPage();
       case 'git':
         return renderGitPage();
       case 'apidocs':
@@ -2475,8 +2760,6 @@
         return renderSettingsPage();
       case 'about':
         return renderAboutPage();
-      case 'projects':
-        return renderProjectsPage();
       case 'workspace':
       default:
         return renderWorkspacePage();
@@ -2490,7 +2773,7 @@
         const isActive = env.id === state.activeEnvironmentId;
         const included = isEnvIncludedInExport(env);
         const vars = Object.entries(env.variables);
-        const canDelete = state.environments.length > 1;
+        const canDelete = true;
         const varRows =
           vars.length === 0
             ? '<p class="text-sm text-gray-400 py-2">No variables yet</p>'
@@ -2733,70 +3016,6 @@
         ${renderImportModal()}
         ${renderCollectionModal()}
         ${renderDeleteCollectionModal()}
-      </div>`;
-  }
-
-  function renderImportExportPage() {
-    const totalRequests = state.folders.reduce((n, f) => n + f.requests.length, 0);
-    const exportCards = EXPORT_FORMATS.map(
-      (fmt) => `
-      <button data-action="quick-export" data-format="${fmt.id}" class="text-left p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-blue-400 hover:shadow-sm transition-all">
-        <div class="font-semibold mb-1">${escapeHtml(fmt.name)}</div>
-        <div class="text-xs text-gray-500">${escapeHtml(fmt.desc)}</div>
-      </button>`
-    ).join('');
-
-    const importCards = IMPORT_FORMATS.map(
-      (fmt) => `
-      <button data-action="quick-import" data-format="${fmt.id}" class="text-left p-4 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl hover:border-blue-400 hover:shadow-sm transition-all">
-        <div class="font-semibold mb-1">${escapeHtml(fmt.name)}</div>
-        <div class="text-xs text-gray-500">${escapeHtml(fmt.desc)}</div>
-      </button>`
-    ).join('');
-
-    return `
-      <div class="flex-1 overflow-y-auto p-6 bg-gray-50 dark:bg-gray-950">
-        <div class=" mx-auto">
-          <div class="mb-6">
-            <h1 class="page-title">Import / Export</h1>
-            <p class="text-sm text-gray-500 mt-1">${escapeHtml(state.projectName)} — ${state.folders.length} collections, ${totalRequests} requests, ${state.environments.length} environments</p>
-          </div>
-
-          <div class="grid md:grid-cols-3 gap-4 mb-8">
-            <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-              <div class="text-3xl font-bold">${state.folders.length}</div>
-              <div class="text-sm text-gray-500 mt-1">Collections</div>
-            </div>
-            <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-              <div class="text-3xl font-bold">${totalRequests}</div>
-              <div class="text-sm text-gray-500 mt-1">Requests</div>
-            </div>
-            <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl p-5">
-              <div class="text-3xl font-bold">${state.environments.length}</div>
-              <div class="text-sm text-gray-500 mt-1">Environments</div>
-            </div>
-          </div>
-
-          <div class="mb-8">
-            <div class="flex items-center justify-between mb-4">
-              <h2 class="text-lg font-semibold">Export Project</h2>
-              <label class="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                <input type="checkbox" data-action="export-include-env" ${exportModal?.includeEnvironments !== false ? 'checked' : ''} class="rounded" />
-                Include selected environments (${getSelectedExportEnvironmentIds().length})
-              </label>
-            </div>
-            <div class="grid sm:grid-cols-2 lg:grid-cols-3 gap-3">${exportCards}</div>
-            <p class="text-xs text-gray-400 mt-3">Tip: Use <strong>HttpForge JSON</strong> for a full backup with environments. Use <strong>JMeter</strong> or <strong>Postman</strong> to share with other tools.</p>
-          </div>
-
-          <div>
-            <h2 class="text-lg font-semibold mb-4">Import from Other Tools</h2>
-            <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">${importCards}</div>
-            <p class="text-xs text-gray-400 mt-3">Supports Postman collections, OpenAPI/Swagger specs, and HttpForge JSON exports (with environments).</p>
-          </div>
-        </div>
-        ${renderExportModal()}
-        ${renderImportModal()}
       </div>`;
   }
 
@@ -3228,7 +3447,7 @@
             <button data-action="git-action" data-git-action="pull" class="git-btn">Pull</button>
             <button data-action="git-action" data-git-action="push" class="git-btn">Push</button>
             <button data-action="git-refresh" class="git-btn" title="Refresh">↻</button>
-            <button data-action="git-toggle-setup" class="git-btn" title="Repository settings">⚙</button>
+            <button type="button" data-action="git-toggle-setup" class="git-btn" title="Repository settings">⚙</button>
           </div>
         </div>
 
@@ -3418,7 +3637,7 @@
         <div class="max-w-2xl mx-auto">
           <div class="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm">
             <div class="px-8 pt-10 pb-8 text-center bg-gradient-to-b from-blue-50/80 to-white dark:from-blue-950/40 dark:to-gray-900">
-            ${window.HTTPFORGE_LOGO_URI ? `<img src="${window.HTTPFORGE_LOGO_URI}" alt="HttpForge" class="w-16 h-16 rounded-2xl mx-auto mb-4 shadow-lg object-contain shrink-0" />` : ''}
+            ${window.HTTPFORGE_LOGO_URI ? `<img src="${window.HTTPFORGE_LOGO_URI}" alt="HttpForge" class="w-[181px]  rounded-2xl mx-auto mb-4 shadow-lg object-contain shrink-0" />` : ''}
               <h1 class="page-title">${escapeHtml(info.name)}</h1>
               <p class="text-sm text-gray-500 mt-1">${t('about.version', { version: info.version })}</p>
               <p class="text-sm font-semibold text-blue-600 dark:text-blue-400 mt-3">${escapeHtml(info.tagline)}</p>
@@ -3532,11 +3751,13 @@
           .join('');
         return `
         <div class="mb-1">
-          <button data-action="toggle-folder" data-folder-id="${folder.id}" class="flex items-center gap-1.5 w-full min-w-0 px-2 py-1.5 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 rounded">
-            <svg class="w-3.5 h-3.5 shrink-0 text-gray-400 ${expanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-            <span class="shrink-0">📁</span>
-            <span class="truncate flex-1 min-w-0 text-left" title="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</span>
-          </button>
+          <div class="explorer-folder-row flex items-center gap-1.5 w-full min-w-0 px-2 py-1.5 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 rounded">
+            <button data-action="toggle-folder" data-folder-id="${folder.id}" class="flex items-center gap-1.5 shrink-0 rounded hover:opacity-80" type="button" title="Expand or collapse collection">
+              <svg class="w-3.5 h-3.5 shrink-0 text-gray-400 ${expanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+              <span class="shrink-0">📁</span>
+            </button>
+            ${renderInlineCollectionName(folder)}
+          </div>
           ${expanded ? `<div class="ml-5 space-y-0.5">${reqItems}</div>` : ''}
         </div>`;
       })
@@ -3557,9 +3778,7 @@
                 ? 'text-yellow-600'
                 : rp === 'grpc'
                   ? 'text-green-600'
-                  : rp === 'mqtt'
-                    ? 'text-sky-600'
-                    : METHOD_COLORS[r.method] || '';
+                  : METHOD_COLORS[r.method] || '';
         return `
         <div class="request-tab-item${tabId === state.activeTabId ? ' is-active' : ''}" data-action="switch-tab" data-tab-id="${tabId}">
           <span class="request-tab-method shrink-0 ${tabColor}">${tabLabel}</span>
@@ -3602,9 +3821,6 @@
           <div class="flex flex-1 overflow-hidden min-h-0">
             <!-- Explorer -->
             <div class="w-56 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0 min-w-0">
-              <div class="px-3 py-2.5 border-b border-gray-100 dark:border-gray-800 text-sm min-w-0">
-                <span class="truncate block min-w-0" title="${escapeHtml(state.projectName)}">${escapeHtml(state.projectName)}</span>
-              </div>
               <div class="flex-1 overflow-y-auto p-2 text-sm">${foldersHtml || `<div class="text-gray-400 px-2 py-4 text-xs">No ${protocolLabel(activeProto)} collections.<br/><button data-action="create-collection-for-protocol" class="text-blue-600 mt-2">Create one</button></div>`}</div>
             </div>
 
@@ -3640,7 +3856,16 @@
                     : '<span class="text-gray-400">No response</span>'
                 }
               </div>
-              <div class="flex items-center border-b border-gray-200 dark:border-gray-700 px-3 shrink-0">${respTabHtml}</div>
+              <div class="flex items-center border-b border-gray-200 dark:border-gray-700 px-3 shrink-0">
+                <div class="flex items-center flex-1 min-w-0 overflow-x-auto">${respTabHtml}</div>
+                ${
+                  resp
+                    ? `<div class="flex items-center shrink-0 pl-2 ml-auto border-l border-gray-200 dark:border-gray-700">
+                        ${iconActionBtn('data-action="download-response"', 'export', 'Download response', 'standalone icon-only response-download-btn')}
+                      </div>`
+                    : ''
+                }
+              </div>
               <div class="flex-1 overflow-hidden flex flex-col min-h-0">${renderResponseContent()}</div>
             </div>
           </div>
@@ -3685,9 +3910,7 @@
 
     const sidebarNav = [
       ['workspace', 'nav.workspace'],
-      ['projects', 'nav.projects'],
       ['collections', 'nav.collections'],
-      ['import-export', 'nav.importExport'],
       ['environments', 'nav.environments'],
       ['git', 'nav.git'],
       ['apidocs', 'nav.apidocs'],
@@ -3712,21 +3935,27 @@
     document.getElementById('app').innerHTML = `
     <div class="${dark} h-full flex flex-col">
       <header class="header-bar h-14 bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-700 shrink-0">
+        <div class="header-left">
+          ${renderProjectName()}
+          <span class="header-protocol-divider header-project-divider" aria-hidden="true"></span>
+        </div>
         <div class="header-center">
           ${renderProtocolTabs()}
         </div>
         <div class="header-right">
           ${renderSearchBar()}
-          <div class="flex items-center gap-2 shrink-0 relative">
-            <button data-action="toggle-env-dropdown" class="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">
-              ${envDotHtml(env?.color || 'green')}
-              <span>${env ? escapeHtml(env.name) : t('header.environment')}</span>
-              <span>▾</span>
-            </button>
-            <div class="dropdown-menu ${envDropdownOpen ? 'open' : ''} bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 min-w-[160px]">${envMenu}</div>
+          <div class="flex items-center gap-2 shrink-0">
             <div class="relative">
-              <button data-action="toggle-gear-dropdown" class="p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-400" title="${t('nav.settings')}" aria-label="${t('nav.settings')}" aria-expanded="${gearDropdownOpen}">
-                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <button type="button" data-action="toggle-env-dropdown" class="flex items-center gap-2 px-3 py-1.5 rounded-lg hover:bg-gray-50 dark:hover:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm">
+                ${envDotHtml(env?.color || 'green')}
+                <span>${env ? escapeHtml(env.name) : t('header.environment')}</span>
+                <span>▾</span>
+              </button>
+              <div class="dropdown-menu ${envDropdownOpen ? 'open' : ''} bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-lg shadow-lg py-1 min-w-[160px]">${envMenu}</div>
+            </div>
+            <div class="relative header-gear-wrap">
+              <button type="button" data-action="toggle-gear-dropdown" class="p-2 hover:bg-gray-50 dark:hover:bg-gray-800 rounded-lg text-gray-600 dark:text-gray-400" title="${t('nav.settings')}" aria-label="${t('nav.settings')}" aria-expanded="${gearDropdownOpen}">
+                <svg class="header-gear-icon" xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                   <path d="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"/>
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.604.852.997 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"/>
                 </svg>
@@ -3765,6 +3994,21 @@
         }
       });
     }
+    if (editingCollectionNameId) {
+      requestAnimationFrame(() => {
+        const input = document.querySelector(
+          `[data-action="inline-collection-name"][data-folder-id="${editingCollectionNameId}"]`
+        );
+        if (input && document.activeElement !== input) {
+          input.focus();
+          input.select();
+        }
+      });
+    }
+  }
+
+  function findFolderById(id) {
+    return state.folders.find((f) => f.id === id);
   }
 
   function findRequestById(id) {
@@ -3773,6 +4017,13 @@
       if (req) return req;
     }
     return null;
+  }
+
+  function renderInlineCollectionName(folder) {
+    if (editingCollectionNameId === folder.id) {
+      return `<input data-action="inline-collection-name" data-folder-id="${folder.id}" type="text" value="${escapeHtml(folder.name)}" class="inline-collection-name-input inline-request-title-input flex-1 min-w-0" />`;
+    }
+    return `<span data-edit-collection-id="${folder.id}" class="collection-name-label truncate flex-1 min-w-0 text-left cursor-pointer" title="${escapeHtml(folder.name)} — double-click to rename">${escapeHtml(folder.name)}</span>`;
   }
 
   function renderInlineRequestTitle(r, className = '') {
@@ -3789,13 +4040,37 @@
     return `<span class="request-tab-name truncate" data-edit-title-id="${r.id}" title="${escapeHtml(r.name)}">${escapeHtml(r.name)}</span>`;
   }
 
+  function beginCollectionNameEdit(folderId) {
+    if (!findFolderById(folderId)) return;
+    editingCollectionNameId = folderId;
+    render();
+  }
+
+  function commitInlineCollectionName(folderId, value) {
+    const folder = findFolderById(folderId);
+    if (!folder) {
+      editingCollectionNameId = null;
+      render();
+      return;
+    }
+    const name = String(value ?? '').trim();
+    editingCollectionNameId = null;
+    if (!name || name === folder.name) {
+      render();
+      return;
+    }
+    folder.name = name;
+    persistState();
+    render();
+    vscode.postMessage({ type: 'updateCollection', collectionId: folderId, name });
+  }
+
   function beginTitleEdit(requestId) {
     const req = findRequestById(requestId);
     if (!req) return;
     state.activeProtocol = getRequestProtocol(req);
-    if (getRequestProtocol(req) === 'graphql' && !req.graphqlQuery) {
-      req.graphqlQuery = DEFAULT_GRAPHQL_QUERY;
-      req.graphqlVariables = '{}';
+    if (getRequestProtocol(req) === 'graphql') {
+      initGraphqlRequest(req);
     }
     if (getRequestProtocol(req) === 'soap') {
       initSoapRequest(req);
@@ -3833,9 +4108,8 @@
     const req = findRequestById(id);
     if (req) {
       state.activeProtocol = getRequestProtocol(req);
-      if (getRequestProtocol(req) === 'graphql' && !req.graphqlQuery) {
-        req.graphqlQuery = DEFAULT_GRAPHQL_QUERY;
-        req.graphqlVariables = '{}';
+      if (getRequestProtocol(req) === 'graphql') {
+        initGraphqlRequest(req);
       }
       if (getRequestProtocol(req) === 'soap') {
         initSoapRequest(req);
@@ -3876,12 +4150,31 @@
   function sendRequest() {
     const req = getActiveRequest();
     if (!req) return;
+    const unresolved = listUnresolvedEnvVars(req.url);
+    if (unresolved.length) {
+      const env = getActiveEnv();
+      const envLabel = env?.name ?? 'your environment';
+      vscode.postMessage({
+        type: 'notify',
+        message: `Unresolved URL variable(s): ${unresolved.join(', ')}. Open Environments, select "${envLabel}", and set their values (e.g. BASE_URL = https://api.example.com).`,
+        level: 'error',
+      });
+      return;
+    }
     if (getRequestProtocol(req) === 'graphql') {
       sendGraphQL();
       return;
     }
     if (getRequestProtocol(req) === 'soap') {
       syncSoapConfig(req);
+      persistState();
+    }
+    if (getRequestProtocol(req) === 'grpc') {
+      req.method = 'POST';
+      const config = ensureRequestConfig(req);
+      config.body = req.body ?? '{}';
+      config.bodyType = 'json';
+      req.bodyType = 'json';
       persistState();
     }
     sending = true;
@@ -3895,6 +4188,17 @@
   function sendGraphQL() {
     const req = getActiveRequest();
     if (!req) return;
+    const unresolved = listUnresolvedEnvVars(req.url);
+    if (unresolved.length) {
+      const env = getActiveEnv();
+      const envLabel = env?.name ?? 'your environment';
+      vscode.postMessage({
+        type: 'notify',
+        message: `Unresolved URL variable(s): ${unresolved.join(', ')}. Open Environments, select "${envLabel}", and set their values (e.g. BASE_URL = https://api.example.com).`,
+        level: 'error',
+      });
+      return;
+    }
     sending = true;
     render();
     vscode.postMessage({
@@ -3967,6 +4271,7 @@
     if (action === 'gear-menu') {
       const gear = el.dataset.gear;
       const href = el.dataset.href;
+      gearDropdownOpen = false;
       if (gear === 'settings') {
         state.sidebarNav = 'settings';
         persistState();
@@ -4149,23 +4454,24 @@
     } else if (action === 'ws-connect') {
       const req = getActiveRequest();
       if (!req) return;
-      if (!wsMessages[req.id]) wsMessages[req.id] = [];
-      wsMessages[req.id].push({ type: 'system', content: 'Connected (UI preview — full WebSocket in a future update)' });
-      render();
+      connectWebSocket(req);
     } else if (action === 'ws-disconnect') {
       const req = getActiveRequest();
       if (!req) return;
-      if (!wsMessages[req.id]) wsMessages[req.id] = [];
-      wsMessages[req.id].push({ type: 'system', content: 'Disconnected' });
-      render();
+      disconnectWebSocket(req);
     } else if (action === 'ws-send') {
       const req = getActiveRequest();
       if (!req) return;
       const input = document.querySelector('[data-action="ws-message-input"]');
       const text = input?.value?.trim();
       if (!text) return;
-      if (!wsMessages[req.id]) wsMessages[req.id] = [];
-      wsMessages[req.id].push({ type: 'sent', content: text });
+      const ws = wsSockets[req.id];
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        vscode.postMessage({ type: 'notify', message: 'Connect to the WebSocket before sending a message.', level: 'error' });
+        return;
+      }
+      ws.send(text);
+      pushWsMessage(req.id, { type: 'sent', content: text });
       if (input) input.value = '';
       render();
     } else if (action === 'ws-clear') {
@@ -4196,42 +4502,13 @@
       }
     } else if (action === 'sidebar-nav') {
       const nav = el.dataset.nav;
-      if (nav === 'history') return;
+      if (nav === 'history' || nav === 'projects') return;
       state.sidebarNav = nav;
       if (el.dataset.nav === 'git' || el.dataset.nav === 'apidocs') {
         vscode.postMessage({ type: 'loadGitStatus' });
       }
       persistState();
       render();
-    } else if (action === 'go-projects') {
-      state.sidebarNav = 'projects';
-      persistState();
-      render();
-    } else if (action === 'new-project') {
-      openProjectModal({ mode: 'create', name: '', description: '' });
-    } else if (action === 'edit-project') {
-      openProjectModal({
-        mode: 'edit',
-        id: el.dataset.projectId,
-        name: el.dataset.projectName,
-        description: el.dataset.projectDescription ?? '',
-      });
-    } else if (action === 'open-project') {
-      openProject(el.dataset.projectId);
-    } else if (action === 'delete-project') {
-      openDeleteProjectModal({ id: el.dataset.projectId, name: el.dataset.projectName ?? 'Project' });
-    } else if (action === 'delete-project-modal-close') {
-      closeDeleteProjectModal();
-    } else if (action === 'delete-project-modal-backdrop') {
-      if (e.target === el) closeDeleteProjectModal();
-    } else if (action === 'delete-project-modal-submit') {
-      submitDeleteProjectModal();
-    } else if (action === 'project-modal-close') {
-      closeProjectModal();
-    } else if (action === 'project-modal-backdrop') {
-      if (e.target === el) closeProjectModal();
-    } else if (action === 'project-modal-submit') {
-      submitProjectModal();
     } else if (action === 'select-env') {
       state.activeEnvironmentId = el.dataset.envId;
       persistState();
@@ -4285,9 +4562,6 @@
       render();
     } else if (action === 'export-modal-include-env') {
       if (exportModal) exportModal.includeEnvironments = el.checked;
-    } else if (action === 'export-include-env') {
-      if (!exportModal) exportModal = { format: 'json', includeEnvironments: el.checked };
-      else exportModal.includeEnvironments = el.checked;
     } else if (action === 'export-modal-submit') {
       if (!exportModal) return;
       const isCollectionExport = Boolean(exportModal.collectionId);
@@ -4300,14 +4574,6 @@
       if (payload.includeEnvironments) payload.environmentIds = getSelectedExportEnvironmentIds();
       vscode.postMessage(payload);
       exportModal = null;
-    } else if (action === 'quick-export') {
-      const includeEl = document.querySelector('[data-action="export-include-env"]');
-      const includeEnvironments = includeEl ? includeEl.checked : true;
-      const payload = { type: 'exportProject', format: el.dataset.format, includeEnvironments };
-      if (includeEnvironments) payload.environmentIds = getSelectedExportEnvironmentIds();
-      vscode.postMessage(payload);
-    } else if (action === 'quick-import') {
-      vscode.postMessage({ type: 'importCollection', format: el.dataset.format });
     } else if (action === 'import-modal-close' || action === 'import-modal-backdrop') {
       if (action === 'import-modal-backdrop' && e.target !== el) return;
       importModal = null;
@@ -4437,7 +4703,7 @@
         return;
       }
       env.variables[check.normalized] = newValue;
-      persistState();
+      flushPersistState();
       render();
     } else if (action === 'add-env-var') {
       const envId = el.dataset.envId;
@@ -4447,7 +4713,7 @@
       const env = state.environments.find((e) => e.id === el.dataset.envId);
       if (!env) return;
       delete env.variables[el.dataset.varKey];
-      persistState();
+      flushPersistState();
       render();
     } else if (action === 'toggle-reveal-var') {
       const key = `${el.dataset.envId}:${el.dataset.varKey}`;
@@ -4518,31 +4784,18 @@
       persistState();
       render();
     } else if (action === 'commit-env-var') {
-      const envId = el.dataset.envId;
-      const env = state.environments.find((e) => e.id === envId);
-      if (!env) return;
-      const keyInput = document.querySelector(`[data-action="new-env-var-key"][data-env-id="${envId}"]`);
-      const valueInput = document.querySelector(`[data-action="new-env-var-value"][data-env-id="${envId}"]`);
-      const check = validateEnvVarName(keyInput?.value ?? '');
-      if (!check.valid) {
-        vscode.postMessage({ type: 'notify', message: check.error, level: 'error' });
-        keyInput?.focus();
-        return;
-      }
-      if (Object.prototype.hasOwnProperty.call(env.variables, check.normalized)) {
-        vscode.postMessage({ type: 'notify', message: `Variable "${check.normalized}" already exists`, level: 'error' });
-        return;
-      }
-      env.variables[check.normalized] = valueInput?.value ?? '';
-      if (keyInput) keyInput.value = '';
-      if (valueInput) valueInput.value = '';
-      persistState();
-      render();
+      commitNewEnvVarFromInputs(el.dataset.envId, {
+        clearInputs: true,
+        renderAfter: true,
+        notifyDuplicate: true,
+      });
     } else if (action === 'copy-response') {
       if (state.lastResponse) {
         navigator.clipboard.writeText(state.lastResponse.body);
         vscode.postMessage({ type: 'notify', message: 'Response copied to clipboard', level: 'success' });
       }
+    } else if (action === 'download-response') {
+      downloadResponse();
     } else if (action === 'history-click') {
       const entry = state.history.find((h) => h.id === el.dataset.historyId);
       if (entry?.requestId) {
@@ -4550,6 +4803,26 @@
       }
     }
   });
+
+  document.getElementById('app').addEventListener('blur', (e) => {
+    const el = e.target;
+    if (!(el instanceof HTMLInputElement)) return;
+    const action = el.dataset.action;
+    if (action === 'set-env-var') {
+      const env = state?.environments.find((item) => item.id === el.dataset.envId);
+      if (env && el.dataset.varKey) {
+        env.variables[el.dataset.varKey] = el.value;
+        flushPersistState();
+      }
+      return;
+    }
+    if (action === 'new-env-var-key' || action === 'new-env-var-value') {
+      const envId = el.dataset.envId;
+      if (envId) {
+        commitNewEnvVarFromInputs(envId, { clearInputs: true, renderAfter: true });
+      }
+    }
+  }, true);
 
   document.getElementById('app').addEventListener('change', (e) => {
     const el = /** @type {HTMLElement} */ (e.target).closest('[data-action]');
@@ -4750,6 +5023,13 @@
   });
 
   document.getElementById('app').addEventListener('dblclick', (e) => {
+    const collectionEl = /** @type {HTMLElement} */ (e.target).closest('[data-edit-collection-id]');
+    if (collectionEl) {
+      e.preventDefault();
+      e.stopPropagation();
+      beginCollectionNameEdit(collectionEl.dataset.editCollectionId);
+      return;
+    }
     const titleEl = /** @type {HTMLElement} */ (e.target).closest('[data-edit-title-id]');
     if (!titleEl || !state) return;
     e.preventDefault();
@@ -4762,6 +5042,8 @@
     if (!el?.dataset?.action || !state) return;
     if (el.dataset.action === 'inline-request-title') {
       commitInlineRequestTitle(el.dataset.requestId, /** @type {HTMLInputElement} */ (el).value);
+    } else if (el.dataset.action === 'inline-collection-name') {
+      commitInlineCollectionName(el.dataset.folderId, /** @type {HTMLInputElement} */ (el).value);
     } else if (el.dataset.action === 'set-request-name') {
       render();
     }
@@ -4793,6 +5075,15 @@
       } else if (e.key === 'Escape') {
         e.preventDefault();
         editingRequestTitleId = null;
+        render();
+      }
+    } else if (el?.dataset?.action === 'inline-collection-name') {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        commitInlineCollectionName(el.dataset.folderId, /** @type {HTMLInputElement} */ (el).value);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        editingCollectionNameId = null;
         render();
       }
     }
@@ -4854,7 +5145,9 @@
         systemIsDark = msg.systemIsDark ?? false;
         requestDeletePending = false;
         collectionDeletePending = false;
+        projectDeletePending = false;
         editingRequestTitleId = null;
+        editingCollectionNameId = null;
         envModal = null;
         projectModal = null;
         deleteProjectModal = null;
@@ -4877,16 +5170,17 @@
         if (!state.activeSoapTab) {
           state.activeSoapTab = 'envelope';
         }
+        ensureActiveRequestDefaults();
         if (!state.projects) {
           state.projects = [];
         }
-        if (state.sidebarNav === 'history') {
-          state.sidebarNav = 'projects';
+        if (state.sidebarNav === 'history' || state.sidebarNav === 'projects') {
+          state.sidebarNav = 'workspace';
         }
         if (!state.planLimits) {
-          state.planLimits = { tierName: 'Free', maxProjects: 2, projectCount: state.projects.length, canCreateProject: true };
+          state.planLimits = { tierName: 'Free', maxProjects: Number.MAX_SAFE_INTEGER, projectCount: state.projects.length, canCreateProject: true };
         }
-        if (state.sidebarNav === 'dashboard') {
+        if (state.sidebarNav === 'dashboard' || state.sidebarNav === 'import-export') {
           state.sidebarNav = 'workspace';
           persistState();
         }
@@ -4907,12 +5201,15 @@
         sending = false;
         requestDeletePending = false;
         collectionDeletePending = false;
+        projectDeletePending = false;
         render();
         vscode.postMessage({ type: 'notify', message: msg.message, level: 'error' });
         break;
       case 'success':
         requestDeletePending = false;
         collectionDeletePending = false;
+        projectDeletePending = false;
+        deleteProjectModal = null;
         if (msg.state) {
           state = msg.state;
         }

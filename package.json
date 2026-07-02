@@ -2,7 +2,7 @@
   "name": "httpforge",
   "displayName": "HttpForge",
   "description": "Privacy First — Forge Your API Requests. Lightweight Postman/Insomnia/Bruno alternative inside VS Code",
-  "version": "0.1.1",
+  "version": "0.1.3",
   "publisher": "httpforge",
   "license": "MIT",
   "icon": "media/icon.png",

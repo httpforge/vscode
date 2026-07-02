@@ -23,7 +23,6 @@ Status: Completed
 ## Phase 2 — Multi-Protocol Platform
 
 * gRPC
-* MQTT
 * SOAP
 * SSE
 * TCP Testing

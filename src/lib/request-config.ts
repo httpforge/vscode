@@ -128,5 +128,15 @@ export function buildExecutionPayload(
 }
 
 export function hasUnresolvedVars(text: string): boolean {
-  return /\{\{[^}]+\}\}/.test(text);
+  return listUnresolvedVars(text).length > 0;
+}
+
+export function listUnresolvedVars(text: string): string[] {
+  const names: string[] = [];
+  const re = /\{\{([^}]+)\}\}/g;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    names.push(match[1].trim());
+  }
+  return names;
 }

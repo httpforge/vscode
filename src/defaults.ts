@@ -8,7 +8,7 @@ export function createDefaultState(): AppState {
     projects: [],
     planLimits: {
       tierName: 'Free',
-      maxProjects: 2,
+      maxProjects: Number.MAX_SAFE_INTEGER,
       projectCount: 0,
       canCreateProject: true,
     },
@@ -24,14 +24,14 @@ export function createDefaultState(): AppState {
     activeGraphqlTab: 'query',
     activeRequestTab: 'auth',
     activeResponseTab: 'json',
-    sidebarNav: 'projects',
+    sidebarNav: 'workspace',
     expandedFolders: [],
     searchQuery: '',
     performance: {
       avgResponseMs: 0,
       requestsPerSec: 0,
       successRate: 100,
-      chart: [40, 55, 45, 70, 60, 85, 75, 50, 65, 80, 90, 55],
+      chart: [],
     },
   };
 }

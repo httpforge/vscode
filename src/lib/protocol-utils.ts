@@ -5,7 +5,7 @@ import type { HttpMethod, Protocol, Collection } from '../domain';
 
 
 export const VALID_PROTOCOLS = new Set<string>([
-  'http', 'graphql', 'soap', 'websocket', 'grpc', 'socketio', 'mqtt', 'ai', 'mcp',
+  'http', 'graphql', 'soap', 'websocket', 'grpc', 'socketio', 'ai', 'mcp',
 ]);
 
 
@@ -36,6 +36,8 @@ export function defaultMethodForProtocol(protocol: Protocol): HttpMethod {
 
     case 'soap':
 
+    case 'grpc':
+
       return 'POST';
 
     default:
@@ -63,6 +65,10 @@ export function defaultNameForProtocol(protocol: Protocol): string {
     case 'websocket':
 
       return 'Untitled WebSocket';
+
+    case 'grpc':
+
+      return 'Untitled gRPC Request';
 
     default:
 
@@ -110,6 +116,20 @@ export function defaultUrlForProtocol(protocol: Protocol): string {
 
   }
 
+}
+
+export function isLegacyMockRequest(request: {
+  name?: string
+  method?: string
+  url?: string
+  protocol?: string
+}): boolean {
+  const protocol = normalizeProtocol(request.protocol)
+  return (
+    request.name === defaultNameForProtocol(protocol) &&
+    request.method === defaultMethodForProtocol(protocol) &&
+    request.url === defaultUrlForProtocol(protocol)
+  )
 }
 
 

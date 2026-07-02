@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import type { AppState, HistoryEntry, HttpResponseResult, ThemeMode, AppLanguage } from './types';
+import type { AppState, HistoryEntry, ThemeMode, AppLanguage } from './types';
 
 const UI_STATE_KEY = 'httpforge.ui';
 const HISTORY_KEY = 'httpforge.history';
@@ -20,7 +20,6 @@ export interface UiPreferences {
   sidebarNav: string;
   expandedFolders: string[];
   searchQuery: string;
-  lastResponse?: HttpResponseResult;
   performance: AppState['performance'];
 }
 
@@ -40,7 +39,7 @@ const defaultUi: UiPreferences = {
     avgResponseMs: 0,
     requestsPerSec: 0,
     successRate: 100,
-    chart: [40, 55, 45, 70, 60, 85, 75, 50, 65, 80, 90, 55],
+    chart: [],
   },
 };
 
@@ -68,9 +67,13 @@ export class UiStore {
   }
 
   async loadUi(): Promise<UiPreferences> {
-    const saved = this.loadWithLegacyMigration<UiPreferences>(UI_STATE_KEY, LEGACY_UI_KEYS);
+    const saved = this.loadWithLegacyMigration<UiPreferences & { lastResponse?: unknown }>(
+      UI_STATE_KEY,
+      LEGACY_UI_KEYS
+    );
     if (!saved) return { ...defaultUi };
-    return { ...defaultUi, ...saved, themeMode: resolveThemeMode(saved) };
+    const { lastResponse: _removed, ...rest } = saved;
+    return { ...defaultUi, ...rest, themeMode: resolveThemeMode(saved) };
   }
 
   async saveUi(ui: UiPreferences): Promise<void> {
@@ -106,7 +109,6 @@ export class UiStore {
       sidebarNav: state.sidebarNav,
       expandedFolders: state.expandedFolders,
       searchQuery: state.searchQuery,
-      lastResponse: state.lastResponse,
       performance: state.performance,
     };
   }
