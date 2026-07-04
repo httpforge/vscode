@@ -434,6 +434,7 @@ code,
   --chrome-tab-strip: #f9fafb;
   --chrome-tab-inactive: #f3f4f6;
   --chrome-tab-active: #ffffff;
+  --chrome-tab-border: #e5e7eb;
   --chrome-tab-text: #374151;
   --chrome-tab-text-muted: #6b7280;
   --chrome-tab-hover: #e5e7eb;
@@ -453,6 +454,7 @@ code,
   --chrome-tab-strip: var(--hf-bg-panel, #121212);
   --chrome-tab-inactive: var(--hf-bg-input, #222223);
   --chrome-tab-active: var(--hf-bg, #141415);
+  --chrome-tab-border: var(--hf-border, #2a2a2b);
   --chrome-tab-text: var(--hf-fg, #e4e4e4);
   --chrome-tab-text-muted: var(--hf-fg-muted, #9d9d9d);
   --chrome-tab-hover: var(--hf-bg-hover, #252526);
@@ -462,6 +464,7 @@ code,
 .request-tabs-scroll {
   display: flex;
   align-items: flex-end;
+  gap: 0.35rem;
   flex: 1;
   min-width: 0;
   overflow-x: auto;
@@ -481,7 +484,7 @@ code,
   padding: 0 0.65rem 0 0.75rem;
   background: var(--chrome-tab-inactive);
   color: var(--chrome-tab-text-muted);
-  border: 1px solid transparent;
+  border: 1px solid var(--chrome-tab-border);
   border-bottom: none;
   border-radius: 0.5rem 0.5rem 0 0;
   cursor: pointer;

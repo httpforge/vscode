@@ -3825,7 +3825,7 @@
             </div>
 
             <!-- Request Editor -->
-            <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-gray-900">
+            <div class="flex-1 flex flex-col min-w-[725px] bg-white dark:bg-gray-900">
               <div class="request-tabs-bar shrink-0">
                 <div class="request-tabs-scroll">${tabsHtml}</div>
                 <div class="request-tabs-actions">
