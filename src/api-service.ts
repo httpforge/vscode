@@ -480,6 +480,12 @@ export class ApiService {
       durationMs: raw.durationMs,
       sizeBytes: raw.sizeBytes,
       timeline: raw.timeline.map((t) => ({ name: t.name, ms: t.value, color: t.color })),
+      request: {
+        method: request.method,
+        url: payload.url,
+        headers: payload.headers,
+        body: payload.body,
+      },
     };
 
     const historyEntry: HistoryEntry = {

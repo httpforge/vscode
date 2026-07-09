@@ -82,6 +82,13 @@ export interface TimelinePhase {
   color: string;
 }
 
+export interface HttpRequestSnapshot {
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: string;
+}
+
 export interface HttpResponseResult {
   status: number;
   statusText: string;
@@ -90,6 +97,7 @@ export interface HttpResponseResult {
   durationMs: number;
   sizeBytes: number;
   timeline: TimelinePhase[];
+  request?: HttpRequestSnapshot;
 }
 
 export type ThemeMode = 'system' | 'light' | 'dark';
@@ -148,8 +156,8 @@ export interface AppState {
 
 export type WebviewToExtensionMessage =
   | { type: 'ready' }
-  | { type: 'sendRequest'; requestId: string }
-  | { type: 'sendGraphQL'; requestId: string; query: string; variables: string }
+  | { type: 'sendRequest'; requestId: string; state?: AppState }
+  | { type: 'sendGraphQL'; requestId: string; query: string; variables: string; state?: AppState }
   | { type: 'saveState'; state: AppState }
   | { type: 'notify'; message: string; level?: 'info' | 'error' | 'success' }
   | { type: 'importCollection'; format: string }

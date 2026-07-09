@@ -220,6 +220,8 @@ export class HttpForgePanel {
 
       case 'sendRequest':
 
+        await this.applyIncomingState(msg.state);
+
         await this.executeRequest(msg.requestId);
 
         break;
@@ -322,6 +324,8 @@ export class HttpForgePanel {
 
       case 'sendGraphQL':
 
+        await this.applyIncomingState(msg.state);
+
         await this.executeGraphQL(msg.requestId, msg.query, msg.variables);
 
         break;
@@ -382,6 +386,14 @@ export class HttpForgePanel {
 
     }
 
+  }
+
+
+
+  private async applyIncomingState(state?: AppState): Promise<void> {
+    if (!state) return;
+    this.state = state;
+    await this.api.saveUiFromState(state);
   }
 
 

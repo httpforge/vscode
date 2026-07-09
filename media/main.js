@@ -753,7 +753,19 @@
     config.headers = ensureKeyValueArray(req.headers);
     config.body = req.body ?? '';
     config.bodyType = req.bodyType || config.bodyType || 'none';
+    config.auth = { ...ensureRequestAuth(req) };
     req.requestConfig = config;
+  }
+
+  function prepareStateForSend() {
+    if (!state) return;
+    commitBulkEditForTable('params', false);
+    commitBulkEditForTable('headers', false);
+    for (const folder of state.folders ?? []) {
+      for (const req of folder.requests) {
+        syncRequestConfigFromLegacy(req);
+      }
+    }
   }
 
   function getActiveRequest() {
@@ -2100,6 +2112,64 @@
     return `<div class="p-4 text-sm text-gray-400">Select a tab above</div>`;
   }
 
+  function parseUrlQueryParams(url) {
+    try {
+      return [...new URL(url).searchParams.entries()].map(([key, value]) => ({ key, value }));
+    } catch {
+      return [];
+    }
+  }
+
+  function renderHeaderRows(headers) {
+    const entries = Object.entries(headers || {});
+    if (entries.length === 0) {
+      return '<tr><td colspan="2" class="px-3 py-2 text-xs text-gray-400">None</td></tr>';
+    }
+    return entries
+      .map(
+        ([k, v]) =>
+          `<tr class="border-b border-gray-50 dark:border-gray-800"><td class="px-3 py-1.5 font-mono text-xs font-medium align-top">${escapeHtml(k)}</td><td class="px-3 py-1.5 font-mono text-xs text-gray-600 dark:text-gray-400 break-all">${escapeHtml(v)}</td></tr>`
+      )
+      .join('');
+  }
+
+  function renderQueryParamRows(url) {
+    const params = parseUrlQueryParams(url);
+    if (params.length === 0) {
+      return '<tr><td colspan="2" class="px-3 py-2 text-xs text-gray-400">None</td></tr>';
+    }
+    return params
+      .map(
+        ({ key, value }) =>
+          `<tr class="border-b border-gray-50 dark:border-gray-800"><td class="px-3 py-1.5 font-mono text-xs font-medium align-top">${escapeHtml(key)}</td><td class="px-3 py-1.5 font-mono text-xs text-gray-600 dark:text-gray-400 break-all">${escapeHtml(value)}</td></tr>`
+      )
+      .join('');
+  }
+
+  function renderRequestDetailsSection(reqSnapshot) {
+    if (!reqSnapshot) return '';
+    return `
+      <section class="response-detail-section">
+        <h3 class="response-detail-heading">Request</h3>
+        <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">Method</div>
+          <div class="font-mono text-xs">${escapeHtml(reqSnapshot.method)}</div>
+        </div>
+        <div class="px-3 py-2 border-b border-gray-100 dark:border-gray-800">
+          <div class="text-[10px] font-semibold uppercase tracking-wider text-gray-400 mb-1">URL</div>
+          <div class="font-mono text-xs break-all text-gray-700 dark:text-gray-300">${escapeHtml(reqSnapshot.url)}</div>
+        </div>
+        <div class="border-b border-gray-100 dark:border-gray-800">
+          <div class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Query Params</div>
+          <table class="w-full text-sm"><tbody>${renderQueryParamRows(reqSnapshot.url)}</tbody></table>
+        </div>
+        <div>
+          <div class="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-gray-400">Request Headers</div>
+          <table class="w-full text-sm"><tbody>${renderHeaderRows(reqSnapshot.headers)}</tbody></table>
+        </div>
+      </section>`;
+  }
+
   function getResponseDownloadPayload() {
     const resp = state.lastResponse;
     if (!resp) return null;
@@ -2111,10 +2181,28 @@
     const statusPrefix = resp.status ? `response-${resp.status}` : 'response';
 
     if (tab === 'headers') {
+      const requestSection = resp.request
+        ? [
+            '=== REQUEST ===',
+            `Method: ${resp.request.method}`,
+            `URL: ${resp.request.url}`,
+            '',
+            'Query Params:',
+            ...parseUrlQueryParams(resp.request.url).map(({ key, value }) => `${key}: ${value}`),
+            '',
+            'Request Headers:',
+            ...Object.entries(resp.request.headers).map(([key, value]) => `${key}: ${value}`),
+            '',
+            '=== RESPONSE ===',
+            'Response Headers:',
+          ].join('\n')
+        : '=== RESPONSE ===\nResponse Headers:\n';
       return {
-        content: Object.entries(resp.headers)
-          .map(([key, value]) => `${key}: ${value}`)
-          .join('\n'),
+        content:
+          requestSection +
+          Object.entries(resp.headers)
+            .map(([key, value]) => `${key}: ${value}`)
+            .join('\n'),
         filename: `${statusPrefix}-headers.txt`,
         mime: 'text/plain',
       };
@@ -2205,13 +2293,15 @@
     const isXml = resp && isXmlContent(resp.body, resp.headers);
 
     if (!resp) {
-      return `<div class="flex-1 flex items-center justify-center text-gray-400 text-sm p-8">Click <strong class="mx-1">Send</strong> to execute the request</div>`;
+      return `<div class="flex-1 flex items-center justify-center text-gray-400 text-sm p-8 min-h-0">Click <strong class="mx-1">Send</strong> to execute the request</div>`;
     }
+
+    const toolbarClass = 'response-toolbar flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800';
 
     if (tab === 'xml' || (tab === 'json' && isSoap && isXml)) {
       const pretty = formatXml(resp.body);
       return `
-        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <div class="${toolbarClass}">
           <button data-action="copy-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Copy">📋</button>
           <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
           <button data-action="format-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Format">≡</button>
@@ -2220,17 +2310,17 @@
     }
     if (tab === 'tree') {
       return `
-        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <div class="${toolbarClass}">
           <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
         </div>
-        <div class="flex-1 overflow-auto p-3">${renderXmlTree(resp.body)}</div>`;
+        <div class="response-scroll-body p-3">${renderXmlTree(resp.body)}</div>`;
     }
 
     if (tab === 'json') {
       const isJson = resp.headers['content-type']?.includes('json') || resp.body.trim().startsWith('{') || resp.body.trim().startsWith('[');
       const content = isJson ? highlightJson(resp.body) : escapeHtml(resp.body);
       return `
-        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <div class="${toolbarClass}">
           <button data-action="copy-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Copy">📋</button>
           <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
           <button data-action="format-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Format">≡</button>
@@ -2239,28 +2329,32 @@
     }
     if (tab === 'raw') {
       return `
-        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <div class="${toolbarClass}">
           <button data-action="copy-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Copy">📋</button>
           <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download response">${iconSvg('export')}</button>
         </div>
         <pre class="response-raw-view">${escapeHtml(resp.body)}</pre>`;
     }
     if (tab === 'headers') {
-      const rows = Object.entries(resp.headers)
-        .map(([k, v]) => `<tr class="border-b border-gray-50 dark:border-gray-800"><td class="px-3 py-1.5 font-mono text-xs font-medium">${escapeHtml(k)}</td><td class="px-3 py-1.5 font-mono text-xs text-gray-600 dark:text-gray-400">${escapeHtml(v)}</td></tr>`)
-        .join('');
+      const responseRows = renderHeaderRows(resp.headers);
       return `
-        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <div class="${toolbarClass}">
           <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download headers">${iconSvg('export')}</button>
         </div>
-        <div class="flex-1 overflow-auto"><table class="w-full text-sm"><tbody>${rows}</tbody></table></div>`;
+        <div class="response-scroll-body">
+          ${renderRequestDetailsSection(resp.request)}
+          <section class="response-detail-section">
+            <h3 class="response-detail-heading">Response Headers</h3>
+            <table class="w-full text-sm"><tbody>${responseRows}</tbody></table>
+          </section>
+        </div>`;
     }
     if (tab === 'timeline') {
       return `
-        <div class="flex items-center justify-end gap-1 px-3 py-1.5 border-b border-gray-100 dark:border-gray-800 shrink-0">
+        <div class="${toolbarClass}">
           <button data-action="download-response" class="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded" title="Download timeline">${iconSvg('export')}</button>
         </div>
-        <div class="flex-1 p-4">${renderTimeline(resp.timeline)}</div>`;
+        <div class="response-scroll-body p-4">${renderTimeline(resp.timeline)}</div>`;
     }
     return '';
   }
@@ -2744,7 +2838,7 @@
 
   function renderPageContent() {
     const nav =
-      state.sidebarNav === 'projects' || state.sidebarNav === 'history'
+      state.sidebarNav === 'projects'
         ? 'workspace'
         : state.sidebarNav;
     switch (nav) {
@@ -2752,6 +2846,8 @@
         return renderEnvironmentsPage();
       case 'collections':
         return renderCollectionsPage();
+      case 'history':
+        return renderHistoryPage();
       case 'git':
         return renderGitPage();
       case 'apidocs':
@@ -2902,7 +2998,7 @@
         <div class=" mx-auto">
           <div class="flex items-center justify-between mb-6">
             <div>
-              <h1 class="page-title">History</h1>
+              <h1 class="page-title">${t('nav.history')}</h1>
               <p class="text-sm text-gray-500 mt-1">${state.history.length} request(s) recorded</p>
             </div>
             ${state.history.length > 0 ? '<button data-action="clear-history" class="px-4 py-2 text-sm text-red-600 border border-red-200 hover:bg-red-50 dark:border-red-800 dark:hover:bg-red-900/20 rounded-lg">Clear History</button>' : ''}
@@ -3715,54 +3811,6 @@
     const resp = state.lastResponse;
     const activeProto = normalizeProtocol(state.activeProtocol);
 
-    const query = state.searchQuery.toLowerCase();
-    const visibleFolders = foldersForProtocol(activeProto);
-    const foldersHtml = visibleFolders
-      .map((folder) => {
-        const requests = folder.requests.filter(
-          (r) =>
-            !query ||
-            r.name.toLowerCase().includes(query) ||
-            r.url.toLowerCase().includes(query) ||
-            r.method.toLowerCase().includes(query)
-        );
-        if (query && requests.length === 0) return '';
-        const expanded = folder.expanded !== false;
-        const reqItems = requests
-          .map(
-            (r) => `
-          <div class="explorer-request-row group flex items-center gap-0.5 w-full rounded ${r.id === state.activeTabId ? 'explorer-request-row-active' : ''}" data-action="open-request" data-request-id="${r.id}">
-            <div class="flex-1 flex items-center gap-2 min-w-0 px-2 py-1.5 rounded ${r.id === state.activeTabId ? 'text-blue-800 dark:text-blue-300' : 'text-gray-600 dark:text-gray-400'}">
-              <button data-action="open-request" data-request-id="${r.id}" class="shrink-0 rounded hover:opacity-80" type="button" title="Open request">
-                <span class="explorer-method-badge ${METHOD_COLORS[r.method] || ''}">${explorerMethodLabel(r)}</span>
-              </button>
-              ${renderInlineRequestTitle(r, 'flex-1 min-w-0 truncate text-[0.92em]')}
-            </div>
-            <div class="flex items-center gap-0.5 mr-0.5 opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
-              ${iconActionBtn(
-                `data-action="delete-request" data-request-id="${r.id}" data-request-name="${escapeHtml(r.name)}" data-collection-name="${escapeHtml(folder.name)}"`,
-                'delete',
-                'Delete request',
-                'inline danger icon-only'
-              )}
-            </div>
-          </div>`
-          )
-          .join('');
-        return `
-        <div class="mb-1">
-          <div class="explorer-folder-row flex items-center gap-1.5 w-full min-w-0 px-2 py-1.5 text-gray-700 dark:text-gray-300 font-medium hover:bg-gray-50 dark:hover:bg-gray-800 rounded">
-            <button data-action="toggle-folder" data-folder-id="${folder.id}" class="flex items-center gap-1.5 shrink-0 rounded hover:opacity-80" type="button" title="Expand or collapse collection">
-              <svg class="w-3.5 h-3.5 shrink-0 text-gray-400 ${expanded ? 'rotate-90' : ''}" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-              <span class="shrink-0">📁</span>
-            </button>
-            ${renderInlineCollectionName(folder)}
-          </div>
-          ${expanded ? `<div class="ml-5 space-y-0.5">${reqItems}</div>` : ''}
-        </div>`;
-      })
-      .join('');
-
     const tabsHtml = state.openTabs
       .map((tabId) => {
         const r = state.folders.flatMap((f) => f.requests).find((x) => x.id === tabId);
@@ -3795,14 +3843,14 @@
           ['xml', 'XML'],
           ['tree', 'Tree'],
           ['raw', 'Raw'],
-          ['headers', `Headers (${resp ? Object.keys(resp.headers).length : 0})`],
+          ['headers', `Headers (${resp ? (Object.keys(resp.request?.headers ?? {}).length + Object.keys(resp.headers).length) : 0})`],
           ['timeline', 'Timeline'],
         ];
       }
       return [
         ['json', 'JSON'],
         ['raw', 'Raw'],
-        ['headers', `Headers (${resp ? Object.keys(resp.headers).length : 0})`],
+        ['headers', `Headers (${resp ? (Object.keys(resp.request?.headers ?? {}).length + Object.keys(resp.headers).length) : 0})`],
         ['timeline', 'Timeline'],
       ];
     })();
@@ -3818,14 +3866,10 @@
     const perfChart = renderPerformanceBarChart();
 
     return `
+          <div class="flex flex-1 flex-col min-h-0 overflow-hidden">
           <div class="flex flex-1 overflow-hidden min-h-0">
-            <!-- Explorer -->
-            <div class="w-56 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0 min-w-0">
-              <div class="flex-1 overflow-y-auto p-2 text-sm">${foldersHtml || `<div class="text-gray-400 px-2 py-4 text-xs">No ${protocolLabel(activeProto)} collections.<br/><button data-action="create-collection-for-protocol" class="text-blue-600 mt-2">Create one</button></div>`}</div>
-            </div>
-
             <!-- Request Editor -->
-            <div class="flex-1 flex flex-col min-w-[725px] bg-white dark:bg-gray-900">
+            <div class="flex-1 flex flex-col min-w-[650px] bg-white dark:bg-gray-900">
               <div class="request-tabs-bar shrink-0">
                 <div class="request-tabs-scroll">${tabsHtml}</div>
                 <div class="request-tabs-actions">
@@ -3846,7 +3890,7 @@
             <div class="panel-resizer" data-resizer="response" title="Drag to resize response panel" aria-label="Resize response panel"></div>
 
             <!-- Response -->
-            <div id="response-panel" class="flex flex-col bg-white dark:bg-gray-900 shrink-0 min-w-0" style="width:${responsePanelWidth}px">
+            <div id="response-panel" class="flex flex-col bg-white dark:bg-gray-900 shrink-0 min-w-0 min-h-0 overflow-hidden" style="width:${responsePanelWidth}px">
               <div class="flex items-center gap-3 px-4 py-2 border-b border-gray-200 dark:border-gray-700 text-sm shrink-0">
                 ${
                   resp
@@ -3866,7 +3910,7 @@
                     : ''
                 }
               </div>
-              <div class="flex-1 overflow-hidden flex flex-col min-h-0">${renderResponseContent()}</div>
+              <div class="response-content">${renderResponseContent()}</div>
             </div>
           </div>
 
@@ -3888,6 +3932,7 @@
                 <div class="flex-1 min-h-0 flex items-end overflow-hidden">${perfChart}</div>
               </div>
             </div>
+          </div>
           </div>`;
   }
 
@@ -3914,6 +3959,7 @@
       ['environments', 'nav.environments'],
       ['git', 'nav.git'],
       ['apidocs', 'nav.apidocs'],
+      ['history', 'nav.history'],
     ];
 
     const navHtml = sidebarNav
@@ -3966,7 +4012,7 @@
         </div>
       </header>
 
-      <div class="flex flex-1 overflow-hidden">
+      <div class="flex flex-1 overflow-hidden min-h-0">
         <aside class="w-48 bg-white dark:bg-gray-900 border-r border-gray-200 dark:border-gray-700 flex flex-col shrink-0">
           <div class="p-3">
             <button data-action="new-request" class="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium rounded-lg">${t('header.newRequest')}</button>
@@ -3975,7 +4021,7 @@
           ${aboutFooter}
         </aside>
 
-        <main class="flex-1 flex flex-col overflow-hidden min-w-0">
+        <main class="flex-1 flex flex-col overflow-hidden min-w-0 min-h-0">
           ${renderPageContent()}
         </main>
       </div>
@@ -4167,7 +4213,6 @@
     }
     if (getRequestProtocol(req) === 'soap') {
       syncSoapConfig(req);
-      persistState();
     }
     if (getRequestProtocol(req) === 'grpc') {
       req.method = 'POST';
@@ -4175,13 +4220,14 @@
       config.body = req.body ?? '{}';
       config.bodyType = 'json';
       req.bodyType = 'json';
-      persistState();
     }
+    prepareStateForSend();
     sending = true;
     render();
     vscode.postMessage({
       type: 'sendRequest',
       requestId: req.id,
+      state,
     });
   }
 
@@ -4199,6 +4245,7 @@
       });
       return;
     }
+    prepareStateForSend();
     sending = true;
     render();
     vscode.postMessage({
@@ -4206,6 +4253,7 @@
       requestId: req.id,
       query: req.graphqlQuery ?? DEFAULT_GRAPHQL_QUERY,
       variables: req.graphqlVariables ?? '{}',
+      state,
     });
   }
 
@@ -4502,7 +4550,7 @@
       }
     } else if (action === 'sidebar-nav') {
       const nav = el.dataset.nav;
-      if (nav === 'history' || nav === 'projects') return;
+      if (nav === 'projects') return;
       state.sidebarNav = nav;
       if (el.dataset.nav === 'git' || el.dataset.nav === 'apidocs') {
         vscode.postMessage({ type: 'loadGitStatus' });
@@ -5174,7 +5222,7 @@
         if (!state.projects) {
           state.projects = [];
         }
-        if (state.sidebarNav === 'history' || state.sidebarNav === 'projects') {
+        if (state.sidebarNav === 'projects') {
           state.sidebarNav = 'workspace';
         }
         if (!state.planLimits) {

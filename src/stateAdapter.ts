@@ -228,22 +228,15 @@ export function requestToConfig(request: ApiRequest): RequestConfig {
       enabled: h.enabled,
     }));
 
-  if (request.requestConfig && request.protocol !== 'graphql') {
-    const config = parseRequestConfig(request.requestConfig);
-    config.params = mapParams();
-    config.headers = mapHeaders();
-    config.auth = legacyAuthToConfig(request.authType, request.authToken);
-    config.body = request.body;
-    if (request.bodyType) config.bodyType = request.bodyType;
-    return config;
-  }
-
   const config = request.requestConfig
     ? parseRequestConfig(request.requestConfig)
     : parseRequestConfig(null);
   config.params = mapParams();
   config.headers = mapHeaders();
-  config.auth = legacyAuthToConfig(request.authType, request.authToken);
+
+  if (!request.requestConfig) {
+    config.auth = legacyAuthToConfig(request.authType, request.authToken);
+  }
 
   if (request.protocol === 'graphql') {
     config.bodyType = 'json';

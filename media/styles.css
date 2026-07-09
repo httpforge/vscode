@@ -931,6 +931,34 @@ code,
 
 .dark .tab-active { color: #60a5fa; border-bottom-color: #60a5fa; }
 
+.response-detail-section + .response-detail-section {
+  border-top: 1px solid #e5e7eb;
+}
+
+.dark .response-detail-section + .response-detail-section,
+:root[data-theme="dark"] .response-detail-section + .response-detail-section {
+  border-top-color: var(--hf-border, #2a2a2b);
+}
+
+.response-detail-heading {
+  margin: 0;
+  padding: 0.65rem 0.75rem;
+  font-size: max(11px, calc(var(--vscode-font-size) * 0.82));
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: #6b7280;
+  background: #f9fafb;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.dark .response-detail-heading,
+:root[data-theme="dark"] .response-detail-heading {
+  color: #9ca3af;
+  background: var(--hf-bg-panel, #121212);
+  border-bottom-color: var(--hf-border, #2a2a2b);
+}
+
 .soap-xml-view .xml-tag { color: #2563eb; }
 .dark .soap-xml-view .xml-tag { color: #93c5fd; }
 .soap-xml-view .xml-comment { color: #6b7280; font-style: italic; }
@@ -1407,9 +1435,37 @@ select {
   border-color: #6b7280;
 }
 
+/* Response panel — constrain height so body scrolls inside the pane */
+#response-panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  align-self: stretch;
+}
+
+.response-content {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.response-toolbar {
+  flex-shrink: 0;
+}
+
+.response-scroll-body {
+  flex: 1 1 0;
+  min-height: 0;
+  overflow: auto;
+}
+
 /* Response viewer */
 .response-json-view {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
   margin: 0;
   padding: 1rem;
@@ -1437,7 +1493,8 @@ select {
 }
 
 .response-raw-view {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   overflow: auto;
   margin: 0;
   padding: 1rem;
